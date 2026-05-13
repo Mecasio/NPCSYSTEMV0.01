@@ -78,9 +78,12 @@ const SuperAdminProfessorEducation = lazy(
 const SuperAdminRegistrarPassword = lazy(
   () => import("./account_management/SuperAdminRegistrarResetPassword"),
 );
-const SuperAdminRequirementsUploader = lazy(
-  () => import("./account_management/SuperAdminRequirementsUploader"),
+const ApplicantRequirementsUploader = lazy(
+  () => import("./account_management/ApplicantRequirementsUploader"),
 );
+const StudentRequirementsUploader = lazy(
+  () => import("./account_management/StudentRequirementsUploader"),
+);  
 const SuperAdminStudentDashboard1 = lazy(
   () => import("./account_management/SuperAdminStudentDashboard1"),
 );
@@ -321,7 +324,6 @@ const EnrollmentOfficerDashboard = lazy(
   () => import("./pages/EnrollmentOfficerDashboard"),
 );
 const FacultyDashboard = lazy(() => import("./pages/FacultyDashboard"));
-const HistoryLogs = lazy(() => import("./pages/HistoryLogs"));
 const RegistrarDashboard = lazy(() => import("./pages/RegistrarDashboard"));
 const ScheduleFilterer = lazy(() => import("./pages/SchedulePlottingFilter"));
 const StudentDashboard = lazy(() => import("./pages/StudentDashboard"));
@@ -411,7 +413,6 @@ const StudentSchedule = lazy(() => import("./student/StudentSchedule"));
 const StudentSectionOffering = lazy(
   () => import("./student/StudentSectionOffering"),
 );
-const Notifications = lazy(() => import("./superadmin/Notifications"));
 const AdminBranches = lazy(
   () => import("./system_management/AdminBranches"),
 );
@@ -1020,14 +1021,7 @@ function App() {
                           </ProtectedRoute>
                         }
                       />
-                      <Route
-                        path="/history_logs"
-                        element={
-                          <ProtectedRoute>
-                            <HistoryLogs />
-                          </ProtectedRoute>
-                        }
-                      />
+
                       <Route
                         path="/audit_logs"
                         element={
@@ -1554,14 +1548,6 @@ function App() {
                         }
                       />
 
-                      <Route
-                        path="/notifications"
-                        element={
-                          <ProtectedRoute>
-                            <Notifications />
-                          </ProtectedRoute>
-                        }
-                      />
 
                       <Route
                         path="/admin_dashboard1"
@@ -1865,11 +1851,19 @@ function App() {
                           </ProtectedRoute>
                         }
                       />
-                      <Route
-                        path="/super_admin_requirements_uploader"
+                       <Route
+                        path="/applicant_requirements_uploader"
                         element={
                           <ProtectedRoute>
-                            <SuperAdminRequirementsUploader />
+                            <ApplicantRequirementsUploader />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/student_requirements_uploader"
+                        element={
+                          <ProtectedRoute>
+                            <StudentRequirementsUploader />
                           </ProtectedRoute>
                         }
                       />

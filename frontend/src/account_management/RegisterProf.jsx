@@ -177,65 +177,6 @@ const RegisterProf = () => {
   };
 
 
-  const [openEmailDialog, setOpenEmailDialog] = useState(false);
-  const [selectedPerson, setSelectedPerson] = useState(null);
-  const [email, setEmail] = useState("");
-  const [generatedPassword, setGeneratedPassword] = useState("");
-
-  const handleOpen = (person) => {
-    const selectedData = person;
-
-    setSelectedPerson(selectedData);
-
-    // ✅ AUTO-FILL EXISTING EMAIL
-    setEmail(selectedData.email || "");
-
-    setGeneratedPassword("");
-
-    setOpenEmailDialog(true);
-  };
-
-  const handleCloseEmailDialog = () => {
-    setOpenEmailDialog(false);
-    setSelectedPerson(null);
-    setEmail("");
-    setGeneratedPassword("");
-  };
-
-  const handleSendEmail = async () => {
-    try {
-      await axios.post(`${API_BASE_URL}/faculty/notify_faculty`, {
-        employee_id: selectedPerson.employee_id,
-        email: email,
-        password: generatedPassword,
-      });
-
-      setSnackbarMessage("Email sent successfully!");
-      setSnackbarSeverity("success");
-      setOpenSnackbar(true);
-
-      handleCloseEmailDialog();
-    } catch (err) {
-      console.error(err);
-
-      setSnackbarMessage("Failed to send email");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-    }
-  };
-
-  const handleGenerateEmailPassword = () => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let password = "";
-
-    for (let i = 0; i < 10; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-
-    setGeneratedPassword(password);
-  };
-
-
   const [searchQuery, setSearchQuery] = useState("");
   const [sortAsc, setSortAsc] = useState(true);
   const [professors, setProfessors] = useState([]);
@@ -546,7 +487,7 @@ const RegisterProf = () => {
   };
 
   const handleSubmit = async () => {
-    const requiredFields = ["fname", "lname", "email", "dprtmnt_id"];
+    const requiredFields = ["fname", "lname", "email"];
 
     // Only required when creating a new professor
     if (!editData) {
@@ -624,32 +565,6 @@ const RegisterProf = () => {
     }
   };
 
-
-  const handleNotifyFaculty = async () => {
-    if (!form.employee_id || !form.email) {
-      setSnackbarMessage("Employee ID and Email are required");
-      setSnackbarSeverity("warning");
-      setOpenSnackbar(true);
-      return;
-    }
-
-    try {
-      await axios.post(`${API_BASE_URL}/faculty/notify_faculty`, {
-        employee_id: form.employee_id,
-        email: form.email,
-        password: form.password // optional
-      });
-
-      setSnackbarMessage("Faculty notified successfully!");
-      setSnackbarSeverity("success");
-      setOpenSnackbar(true);
-    } catch (err) {
-      console.error("Notify error:", err);
-      setSnackbarMessage("Failed to send email");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-    }
-  };
 
   const handleEdit = (prof) => {
     if (!canEdit) {
@@ -1328,17 +1243,6 @@ const RegisterProf = () => {
               >
                 Status
               </TableCell>
-              <TableCell
-                sx={{
-                  color: "white",
-                  fontWeight: "bold",
-                  textAlign: "center",
-                  border: `1px solid ${borderColor}`,
-                }}
-              >
-                Email Accounts
-              </TableCell>
-
             </TableRow>
           </TableHead>
 
@@ -1421,31 +1325,6 @@ const RegisterProf = () => {
                     {prof.status === 1 ? "Active" : "Inactive"}
                   </Button>
                 </TableCell>
-                <TableCell sx={{ border: `1px solid ${borderColor}`, textAlign: "center" }}>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 1,
-                      alignItems: "center",
-                    }}
-                  >
-
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => handleOpen(prof)}
-                      sx={{
-                        minWidth: 140,
-                        height: 40,
-                        backgroundColor: "green",
-                      }}
-                    >
-                      SEND EMAIL
-                    </Button>
-                  </Box>
-                </TableCell>
-
               </TableRow>
             ))}
           </TableBody>
@@ -1571,6 +1450,10 @@ const RegisterProf = () => {
               onChange={handleSelect}
               label="Department"
             >
+              <MenuItem value="">
+                <em>No Department</em>
+              </MenuItem>
+
               {department.map((dep) => (
                 <MenuItem key={dep.dprtmnt_id} value={dep.dprtmnt_id}>
                   {dep.dprtmnt_name}
@@ -1675,14 +1558,6 @@ const RegisterProf = () => {
 
             <Button
               variant="contained"
-              onClick={handleNotifyFaculty}
-
-            >
-              Send Email
-            </Button>
-
-            <Button
-              variant="contained"
               startIcon={<SaveIcon />}
               onClick={handleSubmit}
             >
@@ -1747,126 +1622,6 @@ const RegisterProf = () => {
           {snackbarMessage}
         </Alert>
       </Snackbar>
-      <Dialog
-        open={openEmailDialog}
-        onClose={handleCloseEmailDialog}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle
-          sx={{
-            backgroundColor: settings?.header_color || "#1976d2",
-            color: "white",
-            fontWeight: "bold",
-          }}
-        >
-          Send Faculty Email
-        </DialogTitle>
-
-        <DialogContent sx={{ mt: 2 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-
-
-              <Typography fontWeight={700} mt={1} mb={2}>
-                Employee ID
-              </Typography>
-
-              <TextField
-                label="Employee ID"
-                fullWidth
-                value={selectedPerson?.employee_id || ""}
-                InputProps={{
-                  readOnly: true,
-                }}
-              />
-            </Grid>
-
-
-
-
-            <Grid item xs={12}>
-              <Typography fontWeight={700} mt={1} mb={2}>
-                Faculty Name
-              </Typography>
-              <TextField
-                label="Faculty Name"
-                fullWidth
-                value={
-                  selectedPerson
-                    ? `${selectedPerson.fname} ${selectedPerson.lname}`
-                    : ""
-                }
-                InputProps={{
-                  readOnly: true,
-                }}
-              />
-            </Grid>
-
-
-
-
-            <Grid item xs={12}>
-              <Typography fontWeight={700} mt={1} mb={2}>
-                Email Address
-              </Typography>
-              <TextField
-                label="Email Address"
-                fullWidth
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </Grid>
-
-
-
-
-            <Grid item xs={12}>
-              <Typography fontWeight={700} mt={1} mb={2}>
-                Generate Password
-              </Typography>
-              <TextField
-                label="Generated Password"
-                fullWidth
-                value={generatedPassword}
-                InputProps={{
-                  readOnly: true,
-                }}
-              />
-            </Grid>
-          </Grid>
-
-          <Box mt={3}>
-            <Button
-              variant="contained"
-              startIcon={<LockResetIcon />}
-              onClick={handleGenerateEmailPassword}
-            >
-              Generate Password
-            </Button>
-          </Box>
-        </DialogContent>
-
-        <DialogActions>
-          <Button
-            onClick={handleCloseEmailDialog}
-            color="error"
-            variant="outlined"
-          >
-            Cancel
-          </Button>
-
-          <Button
-            variant="contained"
-            onClick={handleSendEmail}
-            disabled={!generatedPassword}
-          >
-            Send Email
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-
     </Box>
 
   );

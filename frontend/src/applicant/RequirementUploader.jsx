@@ -391,10 +391,11 @@ const RequirementUploader = () => {
               target="_blank"
               startIcon={<VisibilityIcon />}
               sx={{
+                color: "white",
+                fontWeight: "bold",
                 height: "40px",
                 textTransform: "none",
-                minWidth: "100px",
-                width: "100%",
+                minWidth: "140px",
               }}
             >
               Preview
@@ -410,12 +411,10 @@ const RequirementUploader = () => {
               sx={{
                 backgroundColor: "#9E0000",
                 color: "white",
-               
                 fontWeight: "bold",
                 height: "40px",
                 textTransform: "none",
-                minWidth: "100px",
-                width: "100%",
+                minWidth: "140px",
               }}
             >
               Delete

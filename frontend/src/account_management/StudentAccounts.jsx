@@ -571,7 +571,7 @@ export default function StudentAccounts() {
             setLoading(true);
 
             const res = await axios.post(
-                `${API_BASE_URL}/api/notify_student`,
+                `${API_BASE_URL}/api/send_student_password_reminder`,
                 {
                     person_id: selectedPerson.person_id,
                     email,

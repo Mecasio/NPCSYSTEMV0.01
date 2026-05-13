@@ -363,19 +363,6 @@ WHERE proctor LIKE ?
       }
     });
 
-    //  Get Notifications
-    app.get("/api/notifications", async (req, res) => {
-      try {
-        const [rows] = await db.query(
-          "SELECT id, type, message, applicant_number, actor_email, actor_name, timestamp FROM notifications ORDER BY timestamp DESC",
-        );
-        res.json(rows);
-      } catch (err) {
-        console.error(" Fetch notifications error:", err);
-        res.status(500).json({ error: "Failed to fetch notifications" });
-      }
-    });
-
     // ==================== INTERVIEW ROUTES ====================
     // ==============================
     // INTERVIEW ROUTES
@@ -418,7 +405,7 @@ WHERE proctor LIKE ?
     });
 
     // 2) PUT update (must exist)
-    //   Update single Qualifying/Interview scores + log notifications
+    //   Update single Qualifying/Interview scores
 
     // ---------------------------------------------------------
     // 2) SAVE or UPDATE (UPSERT) using person_status_table
@@ -460,7 +447,7 @@ WHERE proctor LIKE ?
           [person_id, qExam, qInterview, totalAve],
         );
 
-        // 4  Return success (no notification here)
+        // 4  Return success
         res.json({
           success: true,
           message: "Interview and exam scores saved successfully!",
@@ -470,44 +457,6 @@ WHERE proctor LIKE ?
         res.status(500).json({ error: "Failed to save interview/exam scores" });
       }
     });
-
-    // ---------------------------------------------------------
-    // 3) Update by applicant_number (same mapping)
-    // ---------------------------------------------------------
-    // ---------------------------------------------------------
-    // Save or Update Interview Scores
-    // ---------------------------------------------------------
-    async function insertNotificationOnce({
-      type = "update",
-      message,
-      applicant_number,
-      actorEmail,
-      actorName,
-    }) {
-      // Prevent duplicates in two ways:
-      // 1) If exact same message exists within last 5 seconds -> skip (protects against double-requests)
-      // 2) Also skip if same message already exists today -> skip (daily dedupe)
-      await db.query(
-        `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-     SELECT ?, ?, ?, ?, ?, NOW()
-     FROM DUAL
-     WHERE NOT EXISTS (
-       SELECT 1 FROM notifications
-       WHERE applicant_number = ?
-         AND message = ?
-         AND (timestamp >= NOW() - INTERVAL 5 SECOND OR DATE(timestamp) = CURDATE())
-     )`,
-        [
-          type,
-          message,
-          applicant_number,
-          actorEmail,
-          actorName,
-          applicant_number,
-          message,
-        ],
-      );
-    }
 
     // ---------------------- Assign Student Number ----------------------
 
@@ -1431,7 +1380,7 @@ WHERE proctor LIKE ?
             skipped: applicant_numbers.length - toAssign.length,
           });
 
-          //   notify all clients
+          // Refresh schedule data for connected clients.
           io.emit("schedule_updated", { schedule_id });
         } catch (err) {
           console.error(" Error updating interview schedule:", err);
@@ -1622,19 +1571,6 @@ WHERE proctor LIKE ?
                 [row.applicant_number],
               );
 
-              // Insert notification log
-              await db.query(
-                `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-           VALUES (?, ?, ?, ?, ?, NOW())`,
-                [
-                  "email",
-                  `  Interview schedule email sent for Applicant #${row.applicant_number} (Schedule #${row.schedule_id})`,
-                  row.applicant_number,
-                  actorEmail,
-                  actorName,
-                ],
-              );
-
               sent.push(row.applicant_number);
             } catch (err) {
               console.error(
@@ -1674,7 +1610,7 @@ WHERE proctor LIKE ?
             message: `Interview emails processed: Sent=${sent.length}, Failed=${failed.length}`,
           });
 
-          // Notify all clients to refresh
+          // Refresh schedule data for connected clients.
           io.emit("schedule_updated", { schedule_id });
         } catch (err) {
           console.error("Error in send_interview_emails:", err);
@@ -2098,15 +2034,6 @@ WHERE proctor LIKE ?
            SET exam_status = 1
            WHERE person_id = ?`,
               [row.person_id],
-            );
-
-            const logMsg = `  Schedule email sent to Applicant #${row.applicant_number}`;
-
-            await db.query(
-              `INSERT INTO notifications
-           (type, message, applicant_number, actor_email, actor_name, timestamp)
-           VALUES (?, ?, ?, ?, ?, NOW())`,
-              ["email", logMsg, row.applicant_number, actorEmail, actorName],
             );
 
             sent.push(row.applicant_number);
@@ -5076,7 +5003,17 @@ WHERE proctor LIKE ?
   });
 
   app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html, senderName, user_person_id } = req.body;
+    const {
+      to,
+      subject,
+      html,
+      senderName,
+      user_person_id,
+      applicant_number,
+      applicant_name,
+      audit_actor_id,
+      audit_actor_role,
+    } = req.body;
 
     if (!to || !subject || !html) {
       return res.status(400).json({ message: "Missing email fields" });
@@ -5162,6 +5099,48 @@ WHERE proctor LIKE ?
         to,
         subject,
         html,
+      });
+
+      const safeActor = audit_actor_id || actor.employee_id || user_person_id || "unknown";
+      const actorRole = audit_actor_role || actor.role || "registrar";
+      const roleLabel = formatAuditActorRole(actorRole);
+      let applicantNumber = applicant_number || "N/A";
+      let applicantName = applicant_name || "";
+
+      try {
+        const [[applicantRow]] = await db.query(
+          `SELECT
+             ant.applicant_number,
+             pt.first_name,
+             pt.middle_name,
+             pt.last_name
+           FROM person_table pt
+           LEFT JOIN applicant_numbering_table ant ON ant.person_id = pt.person_id
+           WHERE pt.emailAddress = ? OR ant.applicant_number = ?
+           LIMIT 1`,
+          [to, applicant_number || ""],
+        );
+
+        if (applicantRow) {
+          applicantNumber = applicantRow.applicant_number || applicantNumber;
+          applicantName = [
+            applicantRow.first_name,
+            applicantRow.middle_name,
+            applicantRow.last_name,
+          ]
+            .filter(Boolean)
+            .join(" ");
+        }
+      } catch (auditLookupErr) {
+        console.error("Failed to look up qualifying/interview email applicant:", auditLookupErr);
+      }
+
+      await insertAuditLogAdmission({
+        actorId: safeActor,
+        role: actorRole,
+        action: "QUALIFYING_INTERVIEW_EMAIL_SENT",
+        severity: "INFO",
+        message: `${roleLabel} (${safeActor}) sent qualifying/interview acceptance email to Applicant #${applicantNumber}${applicantName ? ` - ${applicantName}` : ""} (${to}). Subject: ${subject}.`,
       });
 
       res.json({ success: true, message: "Email sent successfully" });
@@ -5590,26 +5569,6 @@ WHERE proctor LIKE ?
         latest.evaluator_display = `BY: Unknown - System`;
       }
 
-      //   Create notification message
-      const message = ` ️ Document status for Applicant #${applicant_number} set to "${finalStatus}"`;
-
-      // // 💾 Insert notification (only if there's evaluator info)
-      // await db.query(
-      //   `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name)
-      //    VALUES (?, ?, ?, ?, ?)`,
-      //   ['update', message, applicant_number, actorEmail, actorName]
-      // );
-
-      // // 📢 Emit notification via socket.io
-      // io.emit('notification', {
-      //   type: 'update',
-      //   message,
-      //   applicant_number,
-      //   actor_email: actorEmail,
-      //   actor_name: actorName,
-      //   timestamp: new Date().toISOString()
-      // });
-
       return res.json({
         document_status: finalStatus,
         evaluator: latest,
@@ -5907,38 +5866,6 @@ WHERE proctor LIKE ?
           message: `${roleLabel} (${auditActorId}) marked submitted medical documents of Applicant (${applicant_number}) as ${nextSubmittedMedical ? "submitted" : "unsubmitted"}.`,
         });
       }
-
-      //  No duplicates per day (same logic as exam/save)
-      await db.query(
-        `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-       SELECT ?, ?, ?, ?, ?, NOW()
-       FROM DUAL
-       WHERE NOT EXISTS (
-         SELECT 1 FROM notifications
-         WHERE applicant_number = ?
-           AND message = ?
-           AND DATE(timestamp) = CURDATE()
-       )`,
-        [
-          type,
-          message,
-          applicant_number,
-          actorEmail,
-          actorName,
-          applicant_number,
-          message,
-        ],
-      );
-
-      //  Socket emit
-      io.emit("notification", {
-        type,
-        message,
-        applicant_number,
-        actor_email: actorEmail,
-        actor_name: actorName,
-        timestamp: new Date().toISOString(),
-      });
 
       res.json({ success: true, message });
     } catch (err) {
@@ -6444,15 +6371,9 @@ WHERE proctor LIKE ?
       const fullName = `${prof.lname}, ${prof.fname} ${prof.mname}`;
       const email = prof.email;
 
-      await db.query(
-        `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-        [type, message, profID, email, fullName],
-      );
-
-      res.json({ success: true, message: "Log inserted" });
+      res.json({ success: true, message: "Log skipped" });
     } catch (err) {
-      console.error("Error fetching notifications:", err);
+      console.error("Error handling faculty log:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -6763,26 +6684,6 @@ WHERE proctor LIKE ?
         latest.evaluator_display = `BY: Unknown - System`;
       }
 
-      //   Create notification message
-      const message = `  Document status for Student #${student_number} set to "${finalStatus}"`;
-
-      //    Insert notification (only if there's evaluator info)
-      await db.query(
-        `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name)
-       VALUES (?, ?, ?, ?, ?)`,
-        ["update", message, student_number, actorEmail, actorName],
-      );
-
-      //    Emit notification via socket.io
-      io.emit("notification", {
-        type: "update",
-        message,
-        student_number,
-        actor_email: actorEmail,
-        actor_name: actorName,
-        timestamp: new Date().toISOString(),
-      });
-
       return res.json({
         document_status: finalStatus,
         evaluator: latest,
@@ -6870,22 +6771,6 @@ WHERE proctor LIKE ?
       await db.query("DELETE FROM requirement_uploads WHERE upload_id = ?", [
         uploadId,
       ]);
-
-      // 6  Log notification
-      const message = `    Deleted document (Applicant #${student_number} - ${fullName})`;
-      await db.query(
-        "INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp) VALUES (?, ?, ?, ?, ?, NOW())",
-        ["delete", message, student_number, actorEmail, actorName],
-      );
-
-      io.emit("notification", {
-        type: "delete",
-        message,
-        student_number,
-        actor_email: actorEmail,
-        actor_name: actorName,
-        timestamp: new Date().toISOString(),
-      });
 
       res.status(200).json({ message: " Upload deleted successfully." });
     } catch (error) {
@@ -7388,15 +7273,9 @@ WHERE proctor LIKE ?
       const fullName = `${user.last_name || ""}, ${user.first_name || ""} ${user.middle_name || ""}`.trim();
       const email = user.email;
 
-      await db.query(
-        `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-        [type, message, UserID, email, fullName],
-      );
-
-      res.json({ success: true, message: "Log inserted" });
+      res.json({ success: true, message: "Log skipped" });
     } catch (err) {
-      console.error("Error fetching notifications:", err);
+      console.error("Error handling log:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

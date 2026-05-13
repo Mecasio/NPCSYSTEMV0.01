@@ -249,8 +249,29 @@ const AssignQualifyingInterviewExam = () => {
     };
 
     const handleSaveSchedule = async () => {
+        if (!selectedBranch || !day || !buildingName || !roomId || !startTime || !endTime || !interviewer || !roomQuota) {
+            setSnackbarMessage("Please complete all required fields before saving.");
+            setSnackbarSeverity("error");
+            setOpenSnackbar(true);
+            return;
+        }
+
+        if (Number(roomQuota) <= 0) {
+            setSnackbarMessage("Room capacity must be greater than 0.");
+            setSnackbarSeverity("error");
+            setOpenSnackbar(true);
+            return;
+        }
+
         try {
-            const selectedRoom = rooms.find(r => r.room_id === roomId);
+            const selectedRoom = rooms.find(r => String(r.room_id) === String(roomId));
+
+            if (!selectedRoom) {
+                setSnackbarMessage("Please select a valid building and room.");
+                setSnackbarSeverity("error");
+                setOpenSnackbar(true);
+                return;
+            }
 
             const payload = {
                 schedule_id: editingSchedule?.schedule_id,
@@ -291,7 +312,7 @@ const AssignQualifyingInterviewExam = () => {
             );
 
             setSchedules(res.data);
-            setOpenFormDialog(false);
+            closeFormDialog();
 
         } catch (err) {
             console.error("Save error:", err);
@@ -308,6 +329,23 @@ const AssignQualifyingInterviewExam = () => {
     const [editingSchedule, setEditingSchedule] = useState(null);
 
     const [openFormDialog, setOpenFormDialog] = useState(false);
+
+    const resetScheduleForm = () => {
+        setEditingSchedule(null);
+        setSelectedBranch("");
+        setDay("");
+        setBuildingName("");
+        setRoomId("");
+        setStartTime("");
+        setEndTime("");
+        setInterviewer("");
+        setRoomQuota("");
+    };
+
+    const closeFormDialog = () => {
+        setOpenFormDialog(false);
+        resetScheduleForm();
+    };
 
 
     const handleEdit = (row) => {
@@ -643,7 +681,7 @@ const AssignQualifyingInterviewExam = () => {
                                         <Button
                                             variant="contained"
                                             onClick={() => {
-                                                setEditingSchedule(null);
+                                                resetScheduleForm();
                                                 setOpenFormDialog(true);
                                             }}
                                             sx={{
@@ -1220,7 +1258,7 @@ const AssignQualifyingInterviewExam = () => {
 
             <Dialog
                 open={openFormDialog}
-                onClose={() => setOpenFormDialog(false)}
+                onClose={closeFormDialog}
                 maxWidth="md"
                 fullWidth
                 PaperProps={{
@@ -1422,7 +1460,7 @@ const AssignQualifyingInterviewExam = () => {
                     }}
                 >
                     <Button
-                        onClick={() => setOpenFormDialog(false)}
+                        onClick={closeFormDialog}
                         color="error"
                         variant="outlined"
                     >

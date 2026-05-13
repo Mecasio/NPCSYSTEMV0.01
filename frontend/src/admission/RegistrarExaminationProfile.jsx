@@ -23,6 +23,7 @@ import {
 import EaristLogo from "../assets/EaristLogo.png";
 import "../styles/Print.css";
 import API_BASE_URL from "../apiConfig";
+import { postAuditEvent } from "../utils/auditEvents";
 import { FcPrint } from "react-icons/fc";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
@@ -275,10 +276,35 @@ const ExaminationProfile = ({ personId }) => {
 
   const [selectedPreparedBy, setSelectedPreparedBy] = useState(null);
 
-  const handlePreparedByChange = (user) => {
-    setSelectedPreparedBy((prev) =>
-      prev?.employee_id === user.employee_id ? null : user,
-    );
+  const formatPersonName = (item) =>
+    [
+      item?.first_name,
+      item?.middle_name,
+      item?.last_name,
+      item?.extension_name || item?.extension,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const handlePreparedByChange = async (user) => {
+    const isSelected = selectedPreparedBy?.employee_id === user.employee_id;
+    setSelectedPreparedBy(isSelected ? null : user);
+
+    if (isSelected) return;
+
+    try {
+      await postAuditEvent("examination_profile_prepared_by_set", {
+        prepared_by_name: formatPersonName(user),
+        prepared_by_employee_id: user.employee_id || "N/A",
+        applicant_name: formatPersonName(selectedPerson || person),
+        applicant_number:
+          selectedPerson?.applicant_number || applicantNumber || "N/A",
+      });
+    } catch (err) {
+      console.error("Error inserting prepared by audit log:", err);
+    }
   };
 
   const [curriculumOptions, setCurriculumOptions] = useState([]);

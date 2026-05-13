@@ -287,11 +287,6 @@ const Dashboard5 = (props) => {
     try {
       console.log(activeSemesterId);
 
-      // optional notification
-      await axios.post(`${API_BASE_URL}/api/notify-submission`, {
-        person_id: userID,
-      });
-
       localStorage.setItem("currentStep", "6");
 
       showSnackbar(

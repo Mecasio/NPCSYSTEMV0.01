@@ -609,7 +609,7 @@ router.post("/import_professors", async (req, res) => {
 
 
 // ─── Faculty: Password Reset Reminder ───────────────────────────────────────
-router.post("/notify_faculty", async (req, res) => {
+router.post("/send_faculty_password_reminder", async (req, res) => {
   const { employee_id, email, password } = req.body;
 
   let conn;

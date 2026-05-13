@@ -1524,7 +1524,7 @@ const Register = () => {
           </Box>
         </Modal>
 
-        {/* Snackbar Notification */}
+        {/* Snackbar */}
         <Snackbar
           open={snack.open}
           autoHideDuration={4000}

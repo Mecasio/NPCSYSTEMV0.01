@@ -30,7 +30,6 @@ import { io } from "socket.io-client";
 import { Snackbar, Alert } from "@mui/material";
 import API_BASE_URL from "../apiConfig";
 import { useNavigate, useLocation } from "react-router-dom";
-import NotificationsIcon from "@mui/icons-material/Notifications";
 import { FcPrint } from "react-icons/fc";
 import EaristLogo from "../assets/EaristLogo.png";
 
@@ -726,33 +725,6 @@ const SuperAdminApplicantList = () => {
     }
   }, [filteredPersons.length, totalPages]);
 
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
-
-  useEffect(() => {
-    // Load saved notifications from DB on first load
-    axios
-      .get(`${API_BASE_URL}/api/notifications`)
-      .then((res) => {
-        setNotifications(
-          res.data.map((n) => ({
-            ...n,
-            timestamp: n.timestamp,
-          })),
-        );
-      })
-      .catch((err) =>
-        console.error("Failed to load saved notifications:", err),
-      );
-  }, []);
-
-  useEffect(() => {
-    socket.current.on("notification", (data) => {
-      setNotifications((prev) => [data, ...prev]);
-    });
-    return () => socket.current.disconnect();
-  }, []);
-
   const [openDialog, setOpenDialog] = useState(false);
   const [activePerson, setActivePerson] = useState(null);
   const [selected, setSelected] = useState([]);
@@ -1065,74 +1037,6 @@ const SuperAdminApplicantList = () => {
         <Typography variant="h4" fontWeight="bold" sx={{ color: titleColor }}>
           ADMISSION PROCESS FOR REGISTRAR
         </Typography>
-        <Box sx={{ position: "absolute", top: 10, right: 24 }}>
-          <Button
-            sx={{
-              width: 65,
-              height: 65,
-              borderRadius: "50%",
-              "&:hover": { backgroundColor: "#E8C999" },
-            }}
-            onClick={() => setShowNotifications(!showNotifications)}
-          >
-            <NotificationsIcon sx={{ fontSize: 50, color: "white" }} />
-            {notifications.length > 0 && (
-              <Box
-                sx={{
-                  position: "absolute",
-                  top: 5,
-                  right: 5,
-                  background: "red",
-                  color: "white",
-                  borderRadius: "50%",
-                  width: 20,
-                  height: 20,
-                  display: "flex",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  fontSize: "12px",
-                }}
-              >
-                {notifications.length}
-              </Box>
-            )}
-          </Button>
-
-          {showNotifications && (
-            <Paper
-              sx={{
-                position: "absolute",
-                top: 70,
-                right: 0,
-                width: 300,
-                maxHeight: 400,
-                overflowY: "auto",
-                bgcolor: "white",
-                boxShadow: 3,
-                zIndex: 10,
-                borderRadius: 1,
-              }}
-            >
-              {notifications.length === 0 ? (
-                <Typography sx={{ p: 2 }}>No notifications</Typography>
-              ) : (
-                notifications.map((notif, idx) => (
-                  <Box key={idx} sx={{ p: 1, borderBottom: "1px solid #ccc" }}>
-                    <Typography sx={{ fontSize: "14px" }}>
-                      {notif.message}
-                    </Typography>
-                    <Typography sx={{ fontSize: "10px", color: "#888" }}>
-                      {new Date(notif.timestamp).toLocaleString("en-PH", {
-                        timeZone: "Asia/Manila",
-                      })}
-                    </Typography>
-                  </Box>
-                ))
-              )}
-            </Paper>
-          )}
-        </Box>
-
         <Box>
           <TextField
             variant="outlined"

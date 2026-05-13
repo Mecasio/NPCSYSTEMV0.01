@@ -965,24 +965,16 @@ const SuperAdminApplicantDashboard5 = () => {
                                 onClick={async () => {
                                     handleUpdate(); // Save data
 
-                                    try {
-                                        await axios.post(`${API_BASE_URL}/api/notify-submission`, {
-                                            person_id: userID,
-                                        });
+                                    setSnack({
+                                        open: true,
+                                        message:
+                                            "Your account has been successfully registered! Wait for further announcement. Please upload your documents.",
+                                        severity: "success",
+                                    });
 
-                                        setSnack({
-                                            open: true,
-                                            message:
-                                                "Your account has been successfully registered! Wait for further announcement. Please upload your documents.",
-                                            severity: "success",
-                                        });
-
-                                        setTimeout(() => {
-                                            navigate("/requirements_uploader");
-                                        }, 2000);
-                                    } catch (error) {
-                                        console.error("Notification failed:", error);
-                                    }
+                                    setTimeout(() => {
+                                        navigate("/requirements_uploader");
+                                    }, 2000);
                                 }}
                                 endIcon={
                                     <FolderIcon

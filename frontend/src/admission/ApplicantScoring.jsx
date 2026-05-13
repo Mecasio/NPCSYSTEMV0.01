@@ -2309,29 +2309,50 @@ const ApplicantScoring = () => {
                                                 border: `1px solid ${borderColor}`
                                             }}
                                         >
-                                            <TextField
-                                                size="small"
-                                                type="number"
-                                                value={
-                                                    editScores[person.person_id]?.[subject.id] ??
-                                                    person.scores?.[subject.id] ??
-                                                    ""
-                                                }
-                                                onChange={(e) =>
-                                                    handleScoreChange(
-                                                        person.person_id,
-                                                        subject.id,
-                                                        e.target.value
-                                                    )
-                                                }
-                                                inputProps={{
-                                                    min: 0,
-                                                    max: subject.max_score
-                                                }}
+                                            <Box
                                                 sx={{
-                                                    width: "80px"
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    gap: 0.75,
+                                                    whiteSpace: "nowrap",
                                                 }}
-                                            />
+                                            >
+                                                <TextField
+                                                    size="small"
+                                                    type="number"
+                                                    value={
+                                                        editScores[person.person_id]?.[subject.id] ??
+                                                        person.scores?.[subject.id] ??
+                                                        ""
+                                                    }
+                                                    onChange={(e) =>
+                                                        handleScoreChange(
+                                                            person.person_id,
+                                                            subject.id,
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                    inputProps={{
+                                                        min: 0,
+                                                        max: subject.max_score,
+                                                        style: { textAlign: "center" },
+                                                    }}
+                                                    sx={{
+                                                        width: "70px"
+                                                    }}
+                                                />
+                                                <Typography
+                                                    component="span"
+                                                    sx={{
+                                                        color: "black",
+                                                        fontSize: "14px",
+                                                        fontWeight: 500,
+                                                    }}
+                                                >
+                                                    /{Number(subject.max_score || 0)}
+                                                </Typography>
+                                            </Box>
                                         </TableCell>
                                     ))}
 

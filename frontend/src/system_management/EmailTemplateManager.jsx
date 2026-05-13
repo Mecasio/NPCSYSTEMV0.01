@@ -985,7 +985,7 @@ export default function EmailTemplateManager() {
       </Dialog>
 
 
-      {/* ✅ Snackbar Notification */}
+      {/* Snackbar */}
       <Snackbar
         open={snack.open}
         autoHideDuration={4000}

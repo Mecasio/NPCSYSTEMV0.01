@@ -1043,11 +1043,6 @@ const ReadmissionDashboard5 = () => {
                 onClick={async () => {
 
 
-                  try {
-                    await axios.post(`${API_BASE_URL}/api/notify-submission`, {
-                      person_id: userID,
-                    });
-
                     setSnack({
                       open: true,
                       message:
@@ -1058,10 +1053,7 @@ const ReadmissionDashboard5 = () => {
                     setTimeout(() => {
                       navigate("/requirements_uploader");
                     }, 2000);
-                  } catch (error) {
-                    console.error("Notification failed:", error);
-                  }
-                }}
+                  }}
                 endIcon={
                   <FolderIcon
                     sx={{

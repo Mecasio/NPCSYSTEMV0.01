@@ -598,7 +598,7 @@ const SideBar = ({
       { title: "Program Panel Form", link: "/program_panel", icon: LibraryBooks, page_id: 34 },
       { title: "Create Curriculum", link: "/curriculum_panel", icon: EditNote, page_id: 18 },
       { title: "Course Panel Form", link: "/course_panel", icon: MenuBook, page_id: 16 },
-      { title: "NSTP Tagging", link: "/nstp_tagging", icon: MenuBook, page_id: 16 },
+      { title: "NSTP Tagging", link: "/nstp_tagging", icon: MenuBook, page_id: 149 },
       { title: "Program Payment", link: "/program_payment", icon: LibraryBooks, page_id: 111 },
       { title: "Program Unit", link: "/program_unit", icon: MenuBook, page_id: 113 },
       { title: "Prerequisite", link: "/prerequisite", icon: MenuBook, page_id: 112 },
@@ -610,7 +610,7 @@ const SideBar = ({
       { title: "Department Section Panel", link: "/department_section_panel", icon: Apartment, page_id: 20 },
       { title: "Department Panel", link: "/department_registration", icon: Assignment, page_id: 21 },
       { title: "Department Room Panel", link: "/department_room", icon: MeetingRoom, page_id: 22 },
-      { title: "Department Section Tagging", link: "/department_section_tagging", icon: MeetingRoom, page_id: 22 },
+      { title: "Department Section Tagging", link: "/department_section_tagging", icon: MeetingRoom, page_id: 148 },
       { title: "Slot Monitoring Panel", link: "/section_slot_monitoring", icon: MeetingRoom, page_id: 123 },
       { title: "Department Curriculum Panel", link: "/department_curriculum_panel", icon: MenuBook, page_id: 107 },
       { title: "College Schedule Plotting", link: "/college_schedule_plotting", icon: EventNote, page_id: 108 },
@@ -680,8 +680,9 @@ const SideBar = ({
     {
       key: "accountInformation", label: "Account Information", icon: Info, items: [
         { title: "Applicant Information", link: "/super_admin_applicant_dashboard1", icon: Info, page_id: 75 },
-        { title: "Upload Requirements", link: "/super_admin_requirements_uploader", icon: Info, page_id: 84 },
+        { title: "Applicant Upload Requirements", link: "/applicant_requirements_uploader", icon: Info, page_id: 84 },
         { title: "Student Information", link: "/super_admin_student_dashboard1", icon: Info, page_id: 86 },
+        { title: "Student Upload Requirements", link: "/student_requirements_uploader", icon: Info, page_id: 150 },
         { title: "Archive", link: "/archived", icon: Info, page_id: 142 },
       ]
     },
@@ -1020,7 +1021,7 @@ const SideBar = ({
             <NavItem to="/student_section_offering" icon={MenuBook} label="Curriculum" active={isActive("/student_section_offering")} collapsed={collapsed} />
             <NavItem to="/student_faculty_evaluation" icon={AssignmentTurnedInIcon} label="Faculty Evaluation" active={isActive("/student_faculty_evaluation")} collapsed={collapsed} />
             <NavItem to="/student_dashboard1" icon={PersonIcon} label="Student Profile" active={/^\/student_dashboard[1-5]$/.test(loc)} collapsed={collapsed} />
-            <NavItem to="/student_online_requirements" icon={FolderCopy} label="Student Online Requirements" active={isActive("/student_online_requirements")} collapsed={collapsed} />
+            <NavItem to="/student_online_requirements" icon={FolderCopy} label="Official Student Requirements" active={isActive("/student_online_requirements")} collapsed={collapsed} />
             <NavItem to="/student_account_balance" icon={PaymentIcon} label="Student Account Balance" active={isActive("/student_account_balance")} collapsed={collapsed} />
             <div className="sb-section-label">Setting</div>
             <NavItem to="/student_reset_password" icon={Settings} label="Settings" active={isActive("/student_reset_password")} collapsed={collapsed} />

@@ -899,11 +899,6 @@ const SuperAdminStudentDashboard5 = () => {
                                 onClick={async () => {
                                     handleUpdate(person);
 
-                                    try {
-                                        await axios.post(`${API_BASE_URL}/api/notify-submission`, {
-                                            person_id: userID,
-                                        });
-
                                         setSnack({
                                             open: true,
                                             message:
@@ -914,10 +909,7 @@ const SuperAdminStudentDashboard5 = () => {
                                         setTimeout(() => {
                                             navigate("/requirements_uploader");
                                         }, 2000);
-                                    } catch (error) {
-                                        console.error("Notification failed:", error);
-                                    }
-                                }}
+                                    }}
                                 endIcon={
                                     <FolderIcon
                                         sx={{

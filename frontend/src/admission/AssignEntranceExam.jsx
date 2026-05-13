@@ -309,6 +309,18 @@ const AssignEntranceExam = () => {
     setCurrentPage(1);
   }, [searchQuery, selectedMonth, selectedDate, selectedCampusFilter]);
 
+  const resetScheduleForm = () => {
+    setEditingSchedule(null);
+    setSelectedBranch("");
+    setDay("");
+    setBuildingName("");
+    setRoomId("");
+    setStartTime("");
+    setEndTime("");
+    setProctor("");
+    setRoomQuota("");
+  };
+
   const handleSaveSchedule = async () => {
     const sel = rooms.find(r => String(r.room_id) === String(roomId));
     if (!sel) {
@@ -363,6 +375,7 @@ const AssignEntranceExam = () => {
       setEndTime("");
       setProctor("");
       setRoomQuota("");
+      setOpenFormDialog(false);
 
       const res = await axios.get(`${API_BASE_URL}/exam_schedules_with_count`);
       setSchedules(res.data);
@@ -660,7 +673,7 @@ const AssignEntranceExam = () => {
                     <Button
                       variant="contained"
                       onClick={() => {
-                        setEditingSchedule(null);
+                        resetScheduleForm();
                         setOpenFormDialog(true);
                       }}
                       sx={{
@@ -1375,7 +1388,10 @@ const AssignEntranceExam = () => {
 
       <Dialog
         open={openFormDialog}
-        onClose={() => setOpenFormDialog(false)}
+        onClose={() => {
+          setOpenFormDialog(false);
+          resetScheduleForm();
+        }}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -1572,7 +1588,10 @@ const AssignEntranceExam = () => {
           }}
         >
           <Button
-            onClick={() => setOpenFormDialog(false)}
+            onClick={() => {
+              setOpenFormDialog(false);
+              resetScheduleForm();
+            }}
             color="error"
             variant="outlined"
           >
@@ -1592,7 +1611,6 @@ const AssignEntranceExam = () => {
                   setOpenUpdateDialog(true);
                 } else {
                   handleSaveSchedule();
-                  setOpenFormDialog(false);
                 }
               }}
             >

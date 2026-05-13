@@ -406,7 +406,7 @@ router.put("/student_account/:person_id", async (req, res) => {
   }
 });
 
-router.post("/notify_student", async (req, res) => {
+router.post("/send_student_password_reminder", async (req, res) => {
   const { person_id, email, password } = req.body;
 
   let conn;
@@ -536,8 +536,8 @@ router.post("/notify_student", async (req, res) => {
     const roleLabel = formatAuditActorRole(actorRole);
     await insertStudentAccountAuditLog({
       req,
-      action: "STUDENT_ACCOUNT_NOTIFY",
-      message: `${roleLabel} (${actorId}) sent student account notification to Student (${student_number || person_id}).`,
+      action: "STUDENT_ACCOUNT_PASSWORD_REMINDER",
+      message: `${roleLabel} (${actorId}) sent student account password reminder to Student (${student_number || person_id}).`,
     });
 
     res.json({ success: true, message: "Student password reset reminder sent" });

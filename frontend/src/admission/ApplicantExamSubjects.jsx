@@ -208,7 +208,7 @@ const AdminSubjects = () => {
 
     const fetchSubjects = async () => {
         try {
-            const res = await axios.get(`${API_BASE_URL}/api/subjects`);
+            const res = await axios.get(`${API_BASE_URL}/api/subjects/all`);
             setSubjects(res.data || []);
         } catch {
             setSubjects([]);
@@ -296,20 +296,25 @@ const AdminSubjects = () => {
 
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [subjectToDelete, setSubjectToDelete] = useState(null);
+    const [openDeactivateDialog, setOpenDeactivateDialog] = useState(false);
+    const [subjectToDeactivate, setSubjectToDeactivate] = useState(null);
 
-    // Quick toggle active without opening modal
-    const handleDeleteSubject = async (subject) => {
-        if (!canDelete) {
-            setSnack({ open: true, message: "You do not have permission to delete subjects.", severity: "error" });
+    const updateSubjectStatus = async (subject, nextStatus) => {
+        if (!canEdit) {
+            setSnack({ open: true, message: "You do not have permission to edit subjects.", severity: "error" });
             return;
         }
 
         try {
-            await axios.delete(`${API_BASE_URL}/api/subjects/${subject.id}`, auditConfig);
+            await axios.put(`${API_BASE_URL}/api/subjects/${subject.id}`, {
+                name: subject.name,
+                max_score: subject.max_score,
+                is_active: nextStatus,
+            }, auditConfig);
 
             setSnack({
                 open: true,
-                message: "Subject set to inactive successfully.",
+                message: `Subject ${nextStatus === 1 ? "activated" : "deactivated"} successfully.`,
                 severity: "success",
             });
 
@@ -317,10 +322,35 @@ const AdminSubjects = () => {
         } catch (err) {
             setSnack({
                 open: true,
-                message: "Failed to delete subject.",
+                message: `Failed to ${nextStatus === 1 ? "activate" : "deactivate"} subject.`,
                 severity: "error",
             });
         }
+    };
+
+    const handleToggleActive = (subject) => {
+        if (!canEdit) {
+            setSnack({ open: true, message: "You do not have permission to edit subjects.", severity: "error" });
+            return;
+        }
+
+        const isActive = Number(subject.is_active) === 1;
+
+        if (isActive) {
+            setSubjectToDeactivate(subject);
+            setOpenDeactivateDialog(true);
+            return;
+        }
+
+        updateSubjectStatus(subject, 1);
+    };
+
+    const confirmDeactivateSubject = async () => {
+        if (!subjectToDeactivate) return;
+
+        await updateSubjectStatus(subjectToDeactivate, 0);
+        setOpenDeactivateDialog(false);
+        setSubjectToDeactivate(null);
     };
 
 
@@ -667,7 +697,7 @@ const AdminSubjects = () => {
                         Are you sure you want to delete the subject{" "}
                         <b>{subjectToDelete?.name}</b>?
                         <br />
-                        This will set it to <b>Inactive</b> only (soft delete).
+                        This will deleted the subject permanently and it cannot be undone.
                     </Typography>
                 </DialogContent>
 
@@ -697,7 +727,7 @@ const AdminSubjects = () => {
 
                                 setSnack({
                                     open: true,
-                                    message: "Subject set to inactive successfully ✅",
+                                    message: "Subject deleted successfully ✅",
                                     severity: "success",
                                 });
 
@@ -715,6 +745,46 @@ const AdminSubjects = () => {
                         }}
                     >
                         Yes, Delete
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog
+                open={openDeactivateDialog}
+                onClose={() => {
+                    setOpenDeactivateDialog(false);
+                    setSubjectToDeactivate(null);
+                }}
+            >
+                <DialogTitle>Confirm Deactivate Subject</DialogTitle>
+
+                <DialogContent>
+                    <Typography>
+                        Are you sure you want to deactivate the subject{" "}
+                        <b>{subjectToDeactivate?.name}</b>?
+                        <br />
+                        This will set the subject status to inactive.
+                    </Typography>
+                </DialogContent>
+
+                <DialogActions>
+                    <Button
+                        color="inherit"
+                        variant="outlined"
+                        onClick={() => {
+                            setOpenDeactivateDialog(false);
+                            setSubjectToDeactivate(null);
+                        }}
+                    >
+                        Cancel
+                    </Button>
+
+                    <Button
+                        color="warning"
+                        variant="contained"
+                        onClick={confirmDeactivateSubject}
+                    >
+                        Yes, Deactivate
                     </Button>
                 </DialogActions>
             </Dialog>

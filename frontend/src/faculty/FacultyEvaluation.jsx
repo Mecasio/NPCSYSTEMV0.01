@@ -54,6 +54,7 @@ const FacultyEvaluation = () => {
   const [companyName, setCompanyName] = useState("");
   const [shortTerm, setShortTerm] = useState("");
   const [campusAddress, setCampusAddress] = useState("");
+  const [branches, setBranches] = useState([]);
 
   useEffect(() => {
     if (!settings) return;
@@ -78,6 +79,18 @@ const FacultyEvaluation = () => {
     if (settings.company_name) setCompanyName(settings.company_name);
     if (settings.short_term) setShortTerm(settings.short_term);
     if (settings.campus_address) setCampusAddress(settings.campus_address);
+    if (settings?.branches) {
+      try {
+        const parsedBranches =
+          typeof settings.branches === "string"
+            ? JSON.parse(settings.branches)
+            : settings.branches;
+        setBranches(Array.isArray(parsedBranches) ? parsedBranches : []);
+      } catch (err) {
+        console.error("Failed to parse branches:", err);
+        setBranches([]);
+      }
+    }
   }, [settings]);
 
   const [userID, setUserID] = useState("");
@@ -103,6 +116,7 @@ const FacultyEvaluation = () => {
     mname: "",
     lname: "",
     profile_image: "",
+    campus: "",
   });
 
   // Add a ref for the print content
@@ -151,6 +165,7 @@ const FacultyEvaluation = () => {
         mname: first.mname,
         lname: first.lname,
         profile_image: first.profile_image,
+        campus: first.campus || first.branch || "",
       };
       setPerson(profInfo);
     } catch (err) {
@@ -254,16 +269,26 @@ const FacultyEvaluation = () => {
         });
 
         // ✅ Create chartData for Recharts / print
-        grouped[r.course_id].chartData = [
-          { name: "Rating 1", total: r.answered_one_count },
-          { name: "Rating 2", total: r.answered_two_count },
-          { name: "Rating 3", total: r.answered_three_count },
-          { name: "Rating 4", total: r.answered_four_count },
-          { name: "Rating 5", total: r.answered_five_count },
-        ];
       });
 
-      setChartData(Object.values(grouped));
+      const groupedCourses = Object.values(grouped).map((course) => {
+        const totals = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        course.questions.forEach((question) => {
+          [1, 2, 3, 4, 5].forEach((rating) => {
+            totals[rating] += Number(question.counts?.[rating] || 0);
+          });
+        });
+
+        return {
+          ...course,
+          chartData: [1, 2, 3, 4, 5].map((rating) => ({
+            name: `Rating ${rating}`,
+            total: totals[rating],
+          })),
+        };
+      });
+
+      setChartData(groupedCourses);
     } catch (err) {
       console.error(err);
       setChartData([]);
@@ -284,6 +309,158 @@ const FacultyEvaluation = () => {
       0,
     );
   };
+
+  const calculateAverageRating = (counts = {}) => {
+    const total = calculateRatingTotal(counts);
+    if (!total) return 0;
+    const weightedTotal = [1, 2, 3, 4, 5].reduce(
+      (sum, rating) => sum + rating * Number(counts[rating] || 0),
+      0,
+    );
+    return weightedTotal / total;
+  };
+
+  const getRatingInterpretation = (average) => {
+    if (average >= 4.5) return { label: "Excellent", color: "#1b8f3a" };
+    if (average >= 3.5) return { label: "Good", color: "#1976d2" };
+    if (average >= 2.5) return { label: "Needs Improvement", color: "#f59e0b" };
+    if (average > 0) return { label: "Critical", color: "#d32f2f" };
+    return { label: "No responses", color: "#6b7280" };
+  };
+
+  const formatAverage = (value) => Number(value || 0).toFixed(2);
+
+  const getMostCommonRating = (counts = {}) => {
+    const total = calculateRatingTotal(counts);
+    if (!total) return null;
+    return [1, 2, 3, 4, 5].reduce(
+      (best, rating) =>
+        Number(counts[rating] || 0) > Number(counts[best] || 0)
+          ? rating
+          : best,
+      1,
+    );
+  };
+
+  const getRatingDistributionText = (counts = {}) => {
+    const total = calculateRatingTotal(counts);
+    if (!total) return "No responses";
+    return [1, 2, 3, 4, 5]
+      .map((rating) => {
+        const percent = (Number(counts[rating] || 0) / total) * 100;
+        return `R${rating}: ${percent.toFixed(0)}%`;
+      })
+      .join(" / ");
+  };
+
+  const truncateText = (value, maxLength = 42) => {
+    const text = String(value || "");
+    return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+  };
+
+  const insightData = (() => {
+    const ratingTotals = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const courseInsights = [];
+    const questionInsights = [];
+
+    chartData.forEach((course) => {
+      const courseCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+      course.questions.forEach((question) => {
+        [1, 2, 3, 4, 5].forEach((rating) => {
+          const count = Number(question.counts?.[rating] || 0);
+          courseCounts[rating] += count;
+          ratingTotals[rating] += count;
+        });
+
+        const questionAverage = calculateAverageRating(question.counts);
+        questionInsights.push({
+          courseCode: course.course_code,
+          questionId: question.question_id,
+          question: question.question_description,
+          totalResponses: calculateRatingTotal(question.counts),
+          average: questionAverage,
+          interpretation: getRatingInterpretation(questionAverage),
+          counts: question.counts,
+        });
+      });
+
+      const totalResponses = calculateRatingTotal(courseCounts);
+      const average = calculateAverageRating(courseCounts);
+      const courseQuestionInsights = course.questions
+        .map((question) => {
+          const questionAverage = calculateAverageRating(question.counts);
+          return {
+            courseCode: course.course_code,
+            questionId: question.question_id,
+            question: question.question_description,
+            totalResponses: calculateRatingTotal(question.counts),
+            average: questionAverage,
+            interpretation: getRatingInterpretation(questionAverage),
+            counts: question.counts,
+          };
+        })
+        .filter((item) => item.totalResponses > 0)
+        .sort((a, b) => b.average - a.average);
+
+      courseInsights.push({
+        courseId: course.course_id,
+        courseCode: course.course_code,
+        totalResponses,
+        average,
+        interpretation: getRatingInterpretation(average),
+        mostCommonRating: getMostCommonRating(courseCounts),
+        ratingDistributionText: getRatingDistributionText(courseCounts),
+        strongestQuestion: courseQuestionInsights[0] || null,
+        lowestQuestion:
+          courseQuestionInsights[courseQuestionInsights.length - 1] || null,
+        chartData: course.chartData,
+      });
+    });
+
+    const totalResponses = calculateRatingTotal(ratingTotals);
+    const overallAverage = calculateAverageRating(ratingTotals);
+    const sortedCourses = [...courseInsights].sort(
+      (a, b) => b.average - a.average,
+    );
+    const answeredQuestions = questionInsights.filter(
+      (item) => item.totalResponses > 0,
+    );
+    const sortedQuestions = [...answeredQuestions].sort(
+      (a, b) => b.average - a.average,
+    );
+    const mostCommonRating = [1, 2, 3, 4, 5].reduce(
+      (best, rating) =>
+        Number(ratingTotals[rating] || 0) > Number(ratingTotals[best] || 0)
+          ? rating
+          : best,
+      1,
+    );
+
+    return {
+      courseInsights,
+      questionInsights,
+      ratingDistribution: [1, 2, 3, 4, 5].map((rating) => ({
+        name: `Rating ${rating}`,
+        total: ratingTotals[rating],
+      })),
+      overallAverage,
+      totalResponses,
+      bestCourse: sortedCourses[0] || null,
+      lowestCourse: sortedCourses[sortedCourses.length - 1] || null,
+      highestQuestions: sortedQuestions.slice(0, 3),
+      lowestQuestions: [...sortedQuestions].reverse().slice(0, 3),
+      needsAttentionQuestions: answeredQuestions
+        .filter((item) => item.average > 0 && item.average < 3.5)
+        .sort((a, b) => a.average - b.average)
+        .slice(0, 5),
+      mostCommonRating:
+        totalResponses > 0
+          ? { rating: mostCommonRating, count: ratingTotals[mostCommonRating] }
+          : null,
+      interpretation: getRatingInterpretation(overallAverage),
+    };
+  })();
 
   const AuditLog = async () => {
     try {
@@ -313,6 +490,20 @@ const FacultyEvaluation = () => {
     }
 
     // ✅ Dynamic logo and company name
+    const branchList = Array.isArray(branches) ? branches : [];
+    const matchedBranch =
+      branchList.find(
+        (branch) => String(branch?.id) === String(profData.campus),
+      ) || branchList[0];
+    const branchName =
+      matchedBranch?.branch ||
+      matchedBranch?.branch_name ||
+      matchedBranch?.name ||
+      matchedBranch?.campus ||
+      "";
+    const branchAddress = matchedBranch?.address || campusAddress;
+    const campusLine = [branchName, branchAddress].filter(Boolean).join(" - ");
+
     const logoSrc = fetchedLogo || EaristLogo;
     const name = companyName?.trim() || "";
 
@@ -338,52 +529,197 @@ const FacultyEvaluation = () => {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 
+    const courseSummaryRows = [...insightData.courseInsights]
+      .sort((a, b) => a.average - b.average)
+      .map(
+        (course) => `
+          <tr>
+            <td>${escapeHtml(course.courseCode)}</td>
+            <td>${course.totalResponses}</td>
+            <td>${formatAverage(course.average)}</td>
+            <td>${escapeHtml(course.ratingDistributionText)}</td>
+            <td>${escapeHtml(truncateText(course.strongestQuestion?.question || "N/A", 34))}</td>
+            <td>${escapeHtml(truncateText(course.lowestQuestion?.question || "N/A", 34))}</td>
+            <td>${escapeHtml(course.interpretation.label)}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const compactCourseRows = [...insightData.courseInsights]
+      .sort((a, b) => a.average - b.average)
+      .map(
+        (course) => `
+          <tr>
+            <td>${escapeHtml(course.courseCode)}</td>
+            <td>${course.totalResponses}</td>
+            <td>${formatAverage(course.average)}</td>
+            <td>${escapeHtml(course.interpretation.label)}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const distributionMax = Math.max(
+      1,
+      ...insightData.ratingDistribution.map((item) => Number(item.total || 0)),
+    );
+
+    const printableSummary = `
+                        <div class="summary-grid">
+                            <div class="summary-card">
+                                <div class="summary-label">Overall Average</div>
+                                <div class="summary-value">${formatAverage(insightData.overallAverage)} / 5</div>
+                                <div class="summary-note">${escapeHtml(insightData.interpretation.label)}</div>
+                            </div>
+                            <div class="summary-card">
+                                <div class="summary-label">Total Responses</div>
+                                <div class="summary-value">${insightData.totalResponses}</div>
+                                <div class="summary-note">Across all questions</div>
+                            </div>
+                            <div class="summary-card">
+                                <div class="summary-label">Highest Course</div>
+                                <div class="summary-value">${escapeHtml(insightData.bestCourse?.courseCode || "N/A")}</div>
+                                <div class="summary-note">${formatAverage(insightData.bestCourse?.average)} / 5</div>
+                            </div>
+                            <div class="summary-card">
+                                <div class="summary-label">Needs Attention</div>
+                                <div class="summary-value">${escapeHtml(insightData.lowestCourse?.courseCode || "N/A")}</div>
+                                <div class="summary-note">${formatAverage(insightData.lowestCourse?.average)} / 5</div>
+                            </div>
+                        </div>
+                    `;
+
+    const graphPrintContent = `
+                        <style>.chart-container { display: none !important; }</style>
+                        ${printableSummary}
+                        <div class="print-dashboard">
+                            <div class="mini-chart">
+                                <div class="chart-title">OVERALL RATING DISTRIBUTION</div>
+                                <svg viewBox="0 0 360 128" width="100%" height="128">
+                                    ${insightData.ratingDistribution
+                                      .map((item, index) => {
+                                        const barHeight =
+                                          (Number(item.total || 0) /
+                                            distributionMax) *
+                                          78;
+                                        const x = 35 + index * 62;
+                                        const y = 100 - barHeight;
+                                        const colors = [
+                                          "#d32f2f",
+                                          "#f57c00",
+                                          "#fbc02d",
+                                          "#1976d2",
+                                          "#1b8f3a",
+                                        ];
+                                        return `
+                                            <rect x="${x}" y="${y}" width="34" height="${barHeight}" fill="${colors[index]}" />
+                                            <text x="${x + 17}" y="${y - 4}" text-anchor="middle" font-size="8">${item.total}</text>
+                                            <text x="${x + 17}" y="118" text-anchor="middle" font-size="8">R${index + 1}</text>
+                                        `;
+                                      })
+                                      .join("")}
+                                </svg>
+                            </div>
+                            <div class="mini-chart">
+                                <div class="chart-title">COURSE AVERAGE COMPARISON</div>
+                                <svg viewBox="0 0 360 128" width="100%" height="128">
+                                    ${insightData.courseInsights
+                                      .slice()
+                                      .sort((a, b) => a.average - b.average)
+                                      .slice(0, 8)
+                                      .map((course, index) => {
+                                        const barWidth =
+                                          (Number(course.average || 0) / 5) *
+                                          210;
+                                        const y = 13 + index * 14;
+                                        return `
+                                            <text x="4" y="${y + 8}" font-size="7">${escapeHtml(truncateText(course.courseCode, 12))}</text>
+                                            <rect x="78" y="${y}" width="${barWidth}" height="9" fill="${course.interpretation.color}" />
+                                            <text x="${82 + barWidth}" y="${y + 8}" font-size="7">${formatAverage(course.average)}</text>
+                                        `;
+                                      })
+                                      .join("")}
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="table-card compact">
+                            <div class="chart-title">COURSE SUMMARY</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Course</th>
+                                        <th>Responses</th>
+                                        <th>Average</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${compactCourseRows || `<tr><td colspan="4">No evaluation data.</td></tr>`}</tbody>
+                            </table>
+                        </div>
+                    `;
+
     const printableContent =
       displayMode === "table"
         ? `
                         <style>.chart-container { display: none !important; }</style>
+                        ${printableSummary}
                         <div class="table-container">
                             ${
                               chartData.length > 0
-                                ? chartData
-                                    .map(
-                                      (entry) => `
+                                ? `
                                 <div class="table-card">
-                                    <div class="chart-title">EVALUATION FOR COURSE ${escapeHtml(entry.course_code)}</div>
+                                    <div class="chart-title">COURSE SUMMARY</div>
                                     <table>
                                         <thead>
                                             <tr>
-                                                <th>Question</th>
-                                                <th>Rating 1</th>
-                                                <th>Rating 2</th>
-                                                <th>Rating 3</th>
-                                                <th>Rating 4</th>
-                                                <th>Rating 5</th>
-                                                <th>Total</th>
+                                                <th>Course</th>
+                                                <th>Responses</th>
+                                                <th>Average</th>
+                                                <th>Distribution</th>
+                                                <th>Strongest Area</th>
+                                                <th>Lowest Area</th>
+                                                <th>Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            ${entry.questions
-                                              .map(
-                                                (question) => `
-                                                <tr>
-                                                    <td>${escapeHtml(question.question_description)}</td>
-                                                    <td>${Number(question.counts?.[1] || 0)}</td>
-                                                    <td>${Number(question.counts?.[2] || 0)}</td>
-                                                    <td>${Number(question.counts?.[3] || 0)}</td>
-                                                    <td>${Number(question.counts?.[4] || 0)}</td>
-                                                    <td>${Number(question.counts?.[5] || 0)}</td>
-                                                    <td>${calculateRatingTotal(question.counts)}</td>
-                                                </tr>
-                                            `,
-                                              )
-                                              .join("")}
+                                            ${courseSummaryRows}
                                         </tbody>
                                     </table>
                                 </div>
-                            `,
-                                    )
-                                    .join("")
+
+                                <div class="table-card">
+                                    <div class="chart-title">NEEDS ATTENTION</div>
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Course</th>
+                                                <th>Question</th>
+                                                <th>Average</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${
+                                              insightData.needsAttentionQuestions.length
+                                                ? insightData.needsAttentionQuestions
+                                                    .map(
+                                                      (item) => `
+                                                <tr>
+                                                    <td>${escapeHtml(item.courseCode)}</td>
+                                                    <td>${escapeHtml(item.question)}</td>
+                                                    <td>${formatAverage(item.average)}</td>
+                                                    <td>${escapeHtml(item.interpretation.label)}</td>
+                                                </tr>
+                                            `,
+                                                    )
+                                                    .join("")
+                                                : `<tr><td colspan="4">No questions below the attention threshold.</td></tr>`
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `
                                 : `
                                 <div class="no-data">
                                     There's no evaluation in this term.
@@ -392,7 +728,7 @@ const FacultyEvaluation = () => {
                             }
                         </div>
                     `
-        : "";
+        : graphPrintContent;
 
     // Open new print window
     const newWin = window.open("", "Print-Window");
@@ -402,17 +738,23 @@ const FacultyEvaluation = () => {
                 <head>
                     <title>Faculty Evaluation Report</title>
                     <style>
-                        @page { size: A4; margin: 10mm; }
+                        @page { size: A4 portrait; margin: 6mm; }
                         body {
                             font-family: Arial;
-                            margin-top: 50px;
+                            margin: 0;
                             padding: 0;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
                         }
                         .print-container {
                             display: flex;
                             flex-direction: column;
                             align-items: center;
                             text-align: center;
+                            width: 198mm;
+                            min-height: 285mm;
+                            max-height: 285mm;
+                            overflow: hidden;
                         }
                         .print-header {
                             display: flex;
@@ -420,20 +762,20 @@ const FacultyEvaluation = () => {
                             justify-content: center;
                             position: relative;
                             width: 100%;
-                            margin-bottom: 2px;
+                            margin-bottom: 4px;
+                            min-height: 62px;
                         }
                         .print-header img {
                             position: absolute;
-                            left: 0;
-                            margin-left: 50px;
-                            width: 120px;
-                            height: 120px;
+                            left: 28px;
+                            width: 58px;
+                            height: 58px;
                             border-radius: 50%;
                             object-fit: cover;
                         }
                         .evaluation-header {
-                            margin-top: 20px;
-                            margin-bottom: 20px;
+                            margin-top: 4px;
+                            margin-bottom: 6px;
                         }
                         .evaluation-title {
                             font-size: 20px;
@@ -441,8 +783,8 @@ const FacultyEvaluation = () => {
                             margin-bottom: 10px;
                         }
                         .evaluation-subtitle {
-                            font-size: 16px;
-                            margin-bottom: 5px;
+                            font-size: 10px;
+                            margin-bottom: 2px;
                         }
                         .chart-container {
                             margin-top: 0rem;
@@ -450,28 +792,29 @@ const FacultyEvaluation = () => {
                             display: flex;
                             flex-wrap: wrap;
                             justify-content: center;
-                            gap: 20px;
+                            gap: 8px;
                             transform: scale(1);
-                            margin-bottom: 10px;
+                            margin-bottom: 4px;
                         }
                         .chart-card {
-                            width: 45%;
+                            width: 31%;
                             border: 1px solid black;
-                            padding: 10px;
-                            margin-bottom: 20px;    
+                            padding: 5px;
+                            margin-bottom: 5px;
                             page-break-inside: avoid;
-                            border-radius: 12px;
-                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                            border-radius: 4px;
+                            box-shadow: none;
                         }
                         .chart-title {
                             text-align: center;
                             font-weight: bold;
-                            margin-bottom: 10px;
+                            margin-bottom: 4px;
                             color: maroon;
-                            padding-top: 8px;
+                            padding-top: 2px;
+                            font-size: 9px;
                         }
                         .chart-wrapper {
-                            height: 300px;
+                            height: 120px;
                             position: relative;
                         }
                         .total-label {
@@ -491,6 +834,46 @@ const FacultyEvaluation = () => {
                             width: 95%;
                             margin: 0 auto;
                         }
+                        .summary-grid {
+                            display: grid;
+                            grid-template-columns: repeat(4, 1fr);
+                            gap: 5px;
+                            width: 95%;
+                            margin: 0 auto 6px auto;
+                            text-align: left;
+                        }
+                        .summary-card {
+                            border: 1px solid #222;
+                            padding: 5px;
+                            page-break-inside: avoid;
+                        }
+                        .summary-label {
+                            font-size: 6.5px;
+                            text-transform: uppercase;
+                            color: #555;
+                            margin-bottom: 2px;
+                        }
+                        .summary-value {
+                            font-size: 12px;
+                            font-weight: bold;
+                        }
+                        .summary-note {
+                            font-size: 7px;
+                            margin-top: 2px;
+                            color: #444;
+                        }
+                        .print-dashboard {
+                            width: 95%;
+                            display: grid;
+                            grid-template-columns: 1fr 1fr;
+                            gap: 6px;
+                            margin: 0 auto 6px auto;
+                        }
+                        .mini-chart {
+                            border: 1px solid #222;
+                            padding: 4px;
+                            page-break-inside: avoid;
+                        }
                         .table-container {
                             width: 95%;
                             margin: 0 auto;
@@ -498,18 +881,24 @@ const FacultyEvaluation = () => {
                         }
                         .table-card {
                             width: 100%;
-                            margin-bottom: 18px;
+                            margin-bottom: 6px;
                             page-break-inside: avoid;
+                        }
+                        .table-card.compact {
+                            width: 95%;
+                            margin: 0 auto;
                         }
                         table {
                             width: 100%;
                             border-collapse: collapse;
-                            font-size: 11px;
+                            font-size: 6.8px;
+                            table-layout: fixed;
                         }
                         th, td {
                             border: 1px solid #222;
-                            padding: 6px;
+                            padding: 2px 3px;
                             vertical-align: top;
+                            overflow-wrap: anywhere;
                         }
                         th {
                             background: #eeeeee;
@@ -517,7 +906,6 @@ const FacultyEvaluation = () => {
                         }
                         td:not(:first-child) {
                             text-align: center;
-                            width: 70px;
                         }
                     </style>
                 </head>
@@ -527,24 +915,24 @@ const FacultyEvaluation = () => {
                         <div class="print-header">
                             <img src="${logoSrc}" alt="School Logo" />
                             <div>
-                                 <div style="font-size: 13px; font-family: Arial">Republic of the Philippines</div>
+                                 <div style="font-size: 8px; font-family: Arial">Republic of the Philippines</div>
                                 ${
                                   name
                                     ? `
-                                    <b style="letter-spacing: 1px; font-size: 20px; font-family: 'Times New Roman', serif;">
+                                    <b style="letter-spacing: 0.3px; font-size: 12px; font-family: 'Times New Roman', serif;">
                                         ${firstLine}
                                     </b>
                                     ${
                                       secondLine
-                                        ? `<div style="letter-spacing: 1px; font-size: 20px; font-family: 'Times New Roman', serif;"><b>${secondLine}</b></div>`
+                                        ? `<div style="letter-spacing: 0.3px; font-size: 12px; font-family: 'Times New Roman', serif;"><b>${secondLine}</b></div>`
                                         : ""
                                     }
                                 `
                                     : ""
                                 }
-                                <div style="font-size: 12px;">${campusAddress}</div>
-                                <div style="margin-top: 10px;">
-                                    <b style="font-size: 20px; letter-spacing: 1px;">FACULTY EVALUATION REPORT</b>
+                                <div style="font-size: 8px;">${escapeHtml(campusLine || campusAddress)}</div>
+                                <div style="margin-top: 4px;">
+                                    <b style="font-size: 12px; letter-spacing: 0.5px;">FACULTY EVALUATION REPORT</b>
                                 </div>
                                 <div class="evaluation-header">
                                     <div class="evaluation-subtitle">Faculty: ${profData.lname}, ${profData.fname} ${profData.mname}</div>
@@ -563,6 +951,12 @@ const FacultyEvaluation = () => {
                               chartData.length > 0
                                 ? chartData
                                     .map((entry) => {
+                                      const maxChartTotal = Math.max(
+                                        1,
+                                        ...entry.chartData.map((item) =>
+                                          Number(item.total || 0),
+                                        ),
+                                      );
                                       return `
                                 <div class="chart-card">
                                     <div class="chart-title">EVALUATION FOR COURSE ${entry.course_code}</div>
@@ -600,7 +994,7 @@ const FacultyEvaluation = () => {
                                             ${entry.chartData
                                               .map((item, i) => {
                                                 const barHeight =
-                                                  (item.total / 60) * 180; // Scale based on max value of 60
+                                                  (item.total / maxChartTotal) * 180;
                                                 const x = 60 + i * 88;
                                                 const colors = [
                                                   "#FF0000",
@@ -881,6 +1275,198 @@ const FacultyEvaluation = () => {
 
       {displayMode === "graph" ? (
       <div className="print-container" ref={divToPrintRef}>
+        <Grid container spacing={2} sx={{ mt: 3, mb: 3 }}>
+          {[
+            {
+              label: "Overall Average",
+              value: `${formatAverage(insightData.overallAverage)} / 5`,
+              note: insightData.interpretation.label,
+              color: insightData.interpretation.color,
+            },
+            {
+              label: "Total Responses",
+              value: insightData.totalResponses,
+              note: "Across all questions",
+              color: "#374151",
+            },
+            {
+              label: "Highest Course",
+              value: insightData.bestCourse?.courseCode || "N/A",
+              note: `${formatAverage(insightData.bestCourse?.average)} / 5`,
+              color: "#1b8f3a",
+            },
+            {
+              label: "Needs Attention",
+              value: insightData.lowestCourse?.courseCode || "N/A",
+              note: `${formatAverage(insightData.lowestCourse?.average)} / 5`,
+              color: "#d32f2f",
+            },
+          ].map((item) => (
+            <Grid item xs={12} sm={6} md={3} key={item.label}>
+              <Paper
+                sx={{
+                  p: 2,
+                  border: `1px solid ${borderColor}`,
+                  borderLeft: `6px solid ${item.color}`,
+                  borderRadius: 1,
+                  height: "100%",
+                }}
+              >
+                <Typography fontSize={12} color="text.secondary">
+                  {item.label}
+                </Typography>
+                <Typography variant="h5" fontWeight="bold">
+                  {item.value}
+                </Typography>
+                <Typography fontSize={12} sx={{ color: item.color }}>
+                  {item.note}
+                </Typography>
+              </Paper>
+            </Grid>
+          ))}
+        </Grid>
+
+        {chartData.length > 0 && (
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            <Grid item xs={12} lg={6}>
+              <Card
+                sx={{
+                  p: 2,
+                  borderRadius: 1,
+                  border: `1px solid ${borderColor}`,
+                  height: 380,
+                }}
+              >
+                <Typography fontWeight="bold" sx={{ color: "maroon", mb: 1 }}>
+                  Overall Rating Distribution
+                </Typography>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={insightData.ratingDistribution}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="total">
+                      {insightData.ratingDistribution.map((item, idx) => (
+                        <Cell
+                          key={item.name}
+                          fill={
+                            [
+                              "#d32f2f",
+                              "#f57c00",
+                              "#fbc02d",
+                              "#1976d2",
+                              "#1b8f3a",
+                            ][idx]
+                          }
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12} lg={6}>
+              <Card
+                sx={{
+                  p: 2,
+                  borderRadius: 1,
+                  border: `1px solid ${borderColor}`,
+                  height: 380,
+                }}
+              >
+                <Typography fontWeight="bold" sx={{ color: "maroon", mb: 1 }}>
+                  Course Average Comparison
+                </Typography>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={insightData.courseInsights}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="courseCode" />
+                    <YAxis domain={[0, 5]} />
+                    <Tooltip formatter={(value) => formatAverage(value)} />
+                    <Bar dataKey="average">
+                      {insightData.courseInsights.map((item) => (
+                        <Cell
+                          key={item.courseCode}
+                          fill={item.interpretation.color}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Card
+                sx={{
+                  p: 2,
+                  borderRadius: 1,
+                  border: `1px solid ${borderColor}`,
+                }}
+              >
+                <Typography fontWeight="bold" sx={{ color: "maroon", mb: 1 }}>
+                  Question Insights
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Typography fontSize={13} fontWeight="bold">
+                      Highest Rated
+                    </Typography>
+                    {insightData.highestQuestions.map((item) => (
+                      <Box key={`${item.courseCode}-${item.questionId}`} mt={1}>
+                        <Typography fontSize={12}>
+                          {item.courseCode}: {item.question}
+                        </Typography>
+                        <Typography fontSize={12} color="text.secondary">
+                          {formatAverage(item.average)} / 5
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Typography fontSize={13} fontWeight="bold">
+                      Lowest Rated
+                    </Typography>
+                    {insightData.lowestQuestions.map((item) => (
+                      <Box key={`${item.courseCode}-${item.questionId}`} mt={1}>
+                        <Typography fontSize={12}>
+                          {item.courseCode}: {item.question}
+                        </Typography>
+                        <Typography fontSize={12} color="text.secondary">
+                          {formatAverage(item.average)} / 5
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Typography fontSize={13} fontWeight="bold">
+                      Below 3.50
+                    </Typography>
+                    {insightData.needsAttentionQuestions.length ? (
+                      insightData.needsAttentionQuestions.map((item) => (
+                        <Box key={`${item.courseCode}-${item.questionId}`} mt={1}>
+                          <Typography fontSize={12}>
+                            {item.courseCode}: {item.question}
+                          </Typography>
+                          <Typography fontSize={12} color="text.secondary">
+                            {formatAverage(item.average)} / 5
+                          </Typography>
+                        </Box>
+                      ))
+                    ) : (
+                      <Typography fontSize={12} color="text.secondary" mt={1}>
+                        No questions below the attention threshold.
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+              </Card>
+            </Grid>
+          </Grid>
+        )}
+
         <Grid
           container
           spacing={3}
@@ -932,8 +1518,7 @@ const FacultyEvaluation = () => {
                         >
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="name" />
-                          <YAxis allowDecimals={false} domain={[0, 75]} />{" "}
-                          {/* 75 = max responses */}
+                          <YAxis allowDecimals={false} />
                           <Tooltip />
                           <Bar dataKey="total">
                             {entry.chartData.map((item, idx) => (
@@ -979,10 +1564,9 @@ const FacultyEvaluation = () => {
       ) : (
         <Box className="print-container" ref={divToPrintRef} sx={{ mt: 3 }}>
           {chartData.length > 0 ? (
-            chartData.map((entry, index) => (
+            <>
               <TableContainer
                 component={Paper}
-                key={index}
                 sx={{
                   mb: 3,
                   border: `1px solid ${borderColor}`,
@@ -998,7 +1582,7 @@ const FacultyEvaluation = () => {
                     p: 2,
                   }}
                 >
-                  EVALUATION FOR COURSE {entry.course_code}
+                  COURSE SUMMARY
                 </Typography>
                 <Table size="small">
                   <TableHead>
@@ -1008,43 +1592,152 @@ const FacultyEvaluation = () => {
                       }}
                     >
                       <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                        Question
+                        Course
                       </TableCell>
-                      {[1, 2, 3, 4, 5].map((rating) => (
-                        <TableCell
-                          key={rating}
-                          align="center"
-                          sx={{ color: "white", fontWeight: "bold" }}
-                        >
-                          Rating {rating}
-                        </TableCell>
-                      ))}
                       <TableCell
                         align="center"
                         sx={{ color: "white", fontWeight: "bold" }}
                       >
-                        Total
+                        Responses
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ color: "white", fontWeight: "bold" }}
+                      >
+                        Average
+                      </TableCell>
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Distribution
+                      </TableCell>
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Strongest Area
+                      </TableCell>
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Lowest Area
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ color: "white", fontWeight: "bold" }}
+                      >
+                        Status
                       </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {entry.questions.map((question) => (
-                      <TableRow key={question.question_id}>
-                        <TableCell>{question.question_description}</TableCell>
-                        {[1, 2, 3, 4, 5].map((rating) => (
-                          <TableCell key={rating} align="center">
-                            {Number(question.counts?.[rating] || 0)}
+                    {[...insightData.courseInsights]
+                      .sort((a, b) => a.average - b.average)
+                      .map((course) => (
+                        <TableRow key={course.courseId}>
+                          <TableCell sx={{ fontWeight: 700 }}>
+                            {course.courseCode}
                           </TableCell>
-                        ))}
-                        <TableCell align="center">
-                          {calculateRatingTotal(question.counts)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          <TableCell align="center">
+                            {course.totalResponses}
+                          </TableCell>
+                          <TableCell align="center">
+                            {formatAverage(course.average)}
+                          </TableCell>
+                          <TableCell>{course.ratingDistributionText}</TableCell>
+                          <TableCell>
+                            {course.strongestQuestion?.question || "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            {course.lowestQuestion?.question || "N/A"}
+                          </TableCell>
+                          <TableCell
+                            align="center"
+                            sx={{
+                              color: course.interpretation.color,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {course.interpretation.label}
+                          </TableCell>
+                        </TableRow>
+                      ))}
                   </TableBody>
                 </Table>
               </TableContainer>
-            ))
+
+              <TableContainer
+                component={Paper}
+                sx={{
+                  mb: 3,
+                  border: `1px solid ${borderColor}`,
+                  overflowX: "auto",
+                }}
+              >
+                <Typography
+                  variant="h6"
+                  fontWeight="bold"
+                  sx={{
+                    color: "maroon",
+                    textAlign: "center",
+                    p: 2,
+                  }}
+                >
+                  NEEDS ATTENTION
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow
+                      sx={{
+                        backgroundColor: settings?.header_color || "#1976d2",
+                      }}
+                    >
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Course
+                      </TableCell>
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Question
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ color: "white", fontWeight: "bold" }}
+                      >
+                        Average
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ color: "white", fontWeight: "bold" }}
+                      >
+                        Status
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {insightData.needsAttentionQuestions.length ? (
+                      insightData.needsAttentionQuestions.map((item) => (
+                        <TableRow key={`${item.courseCode}-${item.questionId}`}>
+                          <TableCell sx={{ fontWeight: 700 }}>
+                            {item.courseCode}
+                          </TableCell>
+                          <TableCell>{item.question}</TableCell>
+                          <TableCell align="center">
+                            {formatAverage(item.average)}
+                          </TableCell>
+                          <TableCell
+                            align="center"
+                            sx={{
+                              color: item.interpretation.color,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {item.interpretation.label}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center">
+                          No questions below the attention threshold.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </>
           ) : (
             <Typography
               variant="body1"

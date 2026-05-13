@@ -4008,37 +4008,6 @@ router.post("/api/qualifying_exam/import", async (req, res) => {
       );
     }
 
-    // 5️⃣ NOTIFICATION
-    const [registrarRows] = await db3.query(
-      `SELECT last_name, first_name, middle_name, email
-       FROM user_accounts
-       WHERE role = 'registrar'
-       LIMIT 1`
-    );
-
-    const registrar = registrarRows[0];
-    const registrarEmail    = registrar?.email || "earistmis@gmail.com";
-    const registrarFullName = registrar
-      ? `${registrar.last_name}, ${registrar.first_name} ${registrar.middle_name || ""}`.trim()
-      : "Registrar";
-
-    const message = `📊 Qualifying Exam + Interview Results uploaded by ${registrarFullName}`;
-
-    await db.query(
-      `INSERT INTO notifications
-         (type, message, applicant_number, actor_email, actor_name, timestamp)
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-      ["upload", message, null, registrarEmail, registrarFullName]
-    );
-
-    (req.app.get("io") || { emit: () => {} }).emit("notification", {
-      type: "upload",
-      message,
-      applicant_number: null,
-      actor_email:  registrarEmail,
-      actor_name:   registrarFullName,
-      timestamp:    new Date().toISOString()
-    });
 
     // 6️⃣ RETURN UPDATED ROWS so frontend can patch state without a reload
     // Build a map: applicant_number → { qualifying_result, interview_result, exam_result, status }

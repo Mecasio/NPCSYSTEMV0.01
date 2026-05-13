@@ -590,7 +590,7 @@ const PageCRUD = () => {
                 </DialogActions>
             </Dialog>
 
-            {/* Snackbar Notification */}
+            {/* Snackbar */}
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={3000}

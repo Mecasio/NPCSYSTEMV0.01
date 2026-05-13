@@ -419,7 +419,9 @@ router.post("/program-slots/department", async (req, res) => {
       `
       SELECT dc.curriculum_id
       FROM dprtmnt_curriculum_table dc
+      INNER JOIN curriculum_table ct ON dc.curriculum_id = ct.curriculum_id
       WHERE dc.dprtmnt_id = ?
+        AND ct.lock_status = 1
     `,
       [dprtmnt_id],
     );
@@ -512,6 +514,8 @@ router.post("/program-slots/all", async (req, res) => {
     const [curriculumRows] = await db3.query(`
       SELECT dc.curriculum_id
       FROM dprtmnt_curriculum_table dc
+      INNER JOIN curriculum_table ct ON dc.curriculum_id = ct.curriculum_id
+      WHERE ct.lock_status = 1
     `);
 
     const curriculumIds = curriculumRows.map((row) => row.curriculum_id);

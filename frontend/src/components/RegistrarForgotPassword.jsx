@@ -282,7 +282,7 @@ const RegistrarForgotPassword = () => {
         </div>
       </Container>
 
-      {/* Snackbar Notification */}
+      {/* Snackbar */}
       <Snackbar
         open={snack.open}
         autoHideDuration={5000}

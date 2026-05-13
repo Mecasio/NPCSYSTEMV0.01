@@ -37,6 +37,9 @@ import FactCheckIcon from "@mui/icons-material/FactCheck";
 import Unauthorized from "../components/Unauthorized";
 import LoadingOverlay from "../components/LoadingOverlay";
 import SearchIcon from "@mui/icons-material/Search";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
+import VisibilityIcon from "@mui/icons-material/Visibility";
 
 const SuperAdminRequirementsUploader = () => {
   const navigate = useNavigate();
@@ -637,7 +640,10 @@ const SuperAdminRequirementsUploader = () => {
 
   const handleDelete = async (uploadId) => {
     if (!canDelete) {
-      showSnackbar("You do not have permission to delete documents.", "warning");
+      showSnackbar(
+        "You do not have permission to delete documents.",
+        "warning"
+      );
       return;
     }
 
@@ -650,12 +656,29 @@ const SuperAdminRequirementsUploader = () => {
         withCredentials: true,
       });
 
+      // ✅ Refresh uploads
       if (selectedPerson?.applicant_number) {
         fetchUploadsByApplicantNumber(selectedPerson.applicant_number);
       }
+
+      // ✅ SUCCESS SNACKBAR
+      showSnackbar("🗑️ Document deleted successfully!", "success");
+
     } catch (err) {
       console.error("Delete error:", err);
+
+      // ❌ ERROR SNACKBAR
+      showSnackbar("❌ Failed to delete document.", "error");
     }
+  };
+
+  const actionButtonStyle = {
+    height: "40px",
+    width: "100px",
+    minWidth: "100px",
+    textTransform: "none",
+    color: "white",
+    fontWeight: "bold",
   };
 
   const renderRow = (doc) => {
@@ -867,12 +890,10 @@ const SuperAdminRequirementsUploader = () => {
                 <Button
                   variant="contained"
                   size="small"
+                  startIcon={<EditIcon />}
                   sx={{
+                    ...actionButtonStyle,
                     backgroundColor: "green",
-                    color: "white",
-                    "&:hover": {
-                      backgroundColor: "#006400",
-                    },
                   }}
                   onClick={() => {
                     setEditingRemarkId(uploaded.upload_id);
@@ -887,7 +908,11 @@ const SuperAdminRequirementsUploader = () => {
 
                 <Button
                   variant="contained"
-                  sx={{ backgroundColor: "#1976d2", color: "white" }}
+                  startIcon={<VisibilityIcon />}
+                  sx={{
+                    ...actionButtonStyle,
+                    backgroundColor: "#1976d2",
+                  }}
                   href={`${API_BASE_URL}/ApplicantOnlineDocuments/${uploaded.file_path}`}
                   target="_blank"
                 >
@@ -895,11 +920,12 @@ const SuperAdminRequirementsUploader = () => {
                 </Button>
 
                 <Button
+                  variant="contained"
                   onClick={() => handleConfirmDelete(uploaded)}
+                  startIcon={<DeleteIcon />}
                   sx={{
-                    backgroundColor: "maroon",
-                    color: "white",
-
+                    ...actionButtonStyle,
+                    backgroundColor: "#9E0000",
                   }}
                 >
                   Delete
@@ -1653,8 +1679,8 @@ const SuperAdminRequirementsUploader = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setConfirmOpen(false)}
-           color="error"
-            variant="outlined"
+              color="error"
+              variant="outlined"
             >
               Cancel
             </Button>

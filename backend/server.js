@@ -147,7 +147,11 @@ const honorRoutes = require("./routes/system_routes/honorRoutes");
 const nstpTagging = require("./routes/system_routes/nstpTagging");
 const departmentSectionTagging = require("./routes/system_routes/departmentSectionTagging");
 const auditLogsRoute = require("./routes/system_routes/auditLogsRoute");
+const applicantAdminRequirements = require("./routes/admission_routes/applicantAdminRequirements");
+const studentAdminRequirements = require("./routes/admission_routes/studentAdminRequirements");
 
+app.use("/", applicantAdminRequirements);
+app.use("/", studentAdminRequirements);
 app.use("/", evaluation);
 app.use("/", payment);
 app.use("/", statistics);
@@ -549,22 +553,6 @@ app.delete("/admin/uploads/:uploadId", async (req, res) => {
       uploadId,
     ]);
 
-    // 6¸ Log notification
-    const message = `—‘¸ Deleted document (Applicant #${applicant_number} - ${fullName})`;
-    await db.query(
-      "INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp) VALUES (?, ?, ?, ?, ?, NOW())",
-      ["delete", message, applicant_number, actorEmail, actorName],
-    );
-
-    io.emit("notification", {
-      type: "delete",
-      message,
-      applicant_number,
-      actor_email: actorEmail,
-      actor_name: actorName,
-      timestamp: new Date().toISOString(),
-    });
-
     res.status(200).json({ message: " Upload deleted successfully." });
   } catch (error) {
     console.error("Delete error:", error);
@@ -625,6 +613,28 @@ app.put("/api/interview_applicants/:applicant_id/status", async (req, res) => {
   const { status } = req.body;
 
   try {
+    const [[applicantBefore]] = await db.query(
+      `
+      SELECT
+        ia.status,
+        ant.applicant_number,
+        pt.first_name,
+        pt.middle_name,
+        pt.last_name,
+        pt.emailAddress
+      FROM interview_applicants ia
+      LEFT JOIN applicant_numbering_table ant ON ant.applicant_number = ia.applicant_id
+      LEFT JOIN person_table pt ON pt.person_id = ant.person_id
+      WHERE ia.applicant_id = ?
+      LIMIT 1
+      `,
+      [applicant_id],
+    );
+
+    if (!applicantBefore) {
+      return res.status(404).json({ message: "Applicant not found" });
+    }
+
     const [result] = await db.query(
       "UPDATE interview_applicants SET status = ? WHERE applicant_id = ?",
       [status, applicant_id],
@@ -634,6 +644,24 @@ app.put("/api/interview_applicants/:applicant_id/status", async (req, res) => {
       return res.status(404).json({ message: "Applicant not found" });
     }
 
+    const previousStatus = applicantBefore.status || "NONE";
+    const nextStatus = status || "NONE";
+
+    if (previousStatus !== nextStatus) {
+      const actor = await getAuditActorFromRequest(req);
+      const roleLabel = formatAuditActorRole(actor.actorRole);
+      const applicantName = formatPersonFullName(applicantBefore, "Unknown applicant");
+      const applicantEmail = applicantBefore.emailAddress || "No email";
+
+      await insertAuditLogAdmission({
+        actorId: actor.actorId,
+        role: actor.actorRole,
+        action: "QUALIFYING_INTERVIEW_STATUS_UPDATE",
+        severity: "INFO",
+        message: `${roleLabel} (${actor.actorId}) changed qualifying/interview status of Applicant #${applicant_id} - ${applicantName} (${applicantEmail}): ${previousStatus} -> ${nextStatus}.`,
+      });
+    }
+
     res.json({ message: "Status updated successfully" });
   } catch (err) {
     console.error("Error updating applicant status:", err);
@@ -641,7 +669,7 @@ app.put("/api/interview_applicants/:applicant_id/status", async (req, res) => {
   }
 });
 
-//  UPDATE Remarks ONLY (no notification, no io.emit, no evaluator lookup)
+//  UPDATE Remarks ONLY (no socket emit, no evaluator lookup)
 //  Update remarks only
 app.put("/uploads/remarks/:upload_id", async (req, res) => {
   const { upload_id } = req.params;
@@ -960,42 +988,6 @@ app.put("/api/submitted-documents/:upload_id", async (req, res) => {
       message: `${roleLabel} (${actorId}) marked original documents of Applicant (${applicant_number}) as ${submitted_documents === 1 ? "submitted" : "unsubmitted"}.`,
     });
 
-    // 5. Prevent duplicate notifications per day
-    await db.query(
-      `
-      INSERT INTO notifications
-      (type, message, applicant_number, actor_email, actor_name, timestamp)
-      SELECT ?, ?, ?, ?, ?, NOW()
-      FROM DUAL
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM notifications
-        WHERE applicant_number = ?
-          AND message = ?
-          AND DATE(timestamp) = CURDATE()
-      )
-      `,
-      [
-        type,
-        message,
-        applicant_number,
-        actorEmail,
-        actorName,
-        applicant_number,
-        message,
-      ]
-    );
-
-    // 6. Emit socket event
-    io.emit("notification", {
-      type,
-      message,
-      applicant_number,
-      actor_email: actorEmail,
-      actor_name: actorName,
-      timestamp: new Date().toISOString(),
-    });
-
     res.json({
       success: true,
       message,
@@ -1298,18 +1290,6 @@ app.get("/api/upload_documents", async (req, res) => {
   } catch (error) {
     console.error(" Error fetching upload documents:", error);
     res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-app.get("/api/notifications", async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      "SELECT * FROM notifications ORDER BY timestamp DESC",
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error("Error fetching notifications:", err);
-    res.status(500).json({ message: "Internal server error" });
   }
 });
 
@@ -2161,55 +2141,6 @@ app.get("/api/person_with_applicant/:id", async (req, res) => {
 
 // Count how many applicants are enrolled
 
-app.post("/api/notify-submission", async (req, res) => {
-  const { person_id } = req.body;
-
-  if (!person_id) {
-    return res.status(400).json({ message: "Missing person_id" });
-  }
-
-  try {
-    const [[appInfo]] = await db.query(
-      `
-      SELECT
-        ant.applicant_number,
-        pt.last_name,
-        pt.first_name,
-        pt.middle_name
-      FROM applicant_numbering_table ant
-      JOIN person_table pt ON ant.person_id = pt.person_id
-      WHERE ant.person_id = ?
-    `,
-      [person_id],
-    );
-
-    const applicant_number = appInfo?.applicant_number || "Unknown";
-    const fullName = `${appInfo?.last_name || ""}, ${appInfo?.first_name || ""} ${appInfo?.middle_name?.charAt(0) || ""}.`;
-
-    const message = ` Applicant #${applicant_number} - ${fullName} submitted their form.`;
-
-    // Save to notifications table
-    await db.query(
-      "INSERT INTO notifications (type, message, applicant_number) VALUES (?, ?, ?)",
-      ["submit", message, applicant_number],
-    );
-
-    // Emit notification
-    io.emit("notification", {
-      type: "submit",
-      message,
-      applicant_number,
-      timestamp: new Date().toISOString(),
-      by: null, // prevents "Unknown - System" from being shown
-    });
-
-    res.json({ message: "Submission notification sent." });
-  } catch (err) {
-    console.error("Notification error:", err);
-    res.status(500).json({ message: "Failed to notify", error: err.message });
-  }
-});
-
 //  GET person details by person_id
 app.get("/api/person/:id", async (req, res) => {
   const { id } = req.params;
@@ -2514,7 +2445,7 @@ const insertProfileChangeAuditLog = async ({
   });
 };
 
-const getNotificationActorFromRequest = async (req) => {
+const getAuditEventActorFromRequest = async (req) => {
   const tokenPayload = getBearerPayload(req) || {};
   const lookupId =
     req.body?.actor_person_id ||
@@ -2554,7 +2485,7 @@ const getNotificationActorFromRequest = async (req) => {
       };
     }
   } catch (error) {
-    console.error("Notification audit actor lookup failed:", error);
+    console.error("Audit actor lookup failed:", error);
   }
 
   return {
@@ -2565,7 +2496,7 @@ const getNotificationActorFromRequest = async (req) => {
   };
 };
 
-const getFacultyNotificationActor = async (profId) => {
+const getFacultyAuditActor = async (profId) => {
   try {
     const [rows] = await db3.query(
       "SELECT prof_id, employee_id, email, fname, mname, lname FROM prof_table WHERE prof_id = ? LIMIT 1",
@@ -2576,29 +2507,29 @@ const getFacultyNotificationActor = async (profId) => {
       const professor = rows[0];
       return {
         id: professor.employee_id || professor.prof_id,
-        notificationId: professor.prof_id,
+        auditId: professor.prof_id,
         email: professor.email || "unknown",
         name: `${professor.lname || ""}, ${professor.fname || ""} ${professor.mname || ""}`.trim(),
       };
     }
   } catch (error) {
-    console.error("Faculty notification audit actor lookup failed:", error);
+    console.error("Faculty audit actor lookup failed:", error);
   }
 
   return {
     id: profId || "unknown",
-    notificationId: profId || "unknown",
+    auditId: profId || "unknown",
     email: "unknown",
     name: profId || "unknown",
   };
 };
 
-const buildNotificationAuditMessage = async (req) => {
+const buildAuditEventMessage = async (req) => {
   const eventType = String(req.body?.event_type || "").trim();
   const details = req.body?.details || {};
   const actor = eventType.startsWith("faculty_")
-    ? await getFacultyNotificationActor(details.prof_id)
-    : await getNotificationActorFromRequest(req);
+    ? await getFacultyAuditActor(details.prof_id)
+    : await getAuditEventActorFromRequest(req);
   const employeePrefix = `${actor.accessDescription || "Employee ID"} #${actor.id} - ${actor.email || actor.name}`;
   const userPrefix = `User #${actor.id} - ${actor.name}`;
 
@@ -2627,6 +2558,13 @@ const buildNotificationAuditMessage = async (req) => {
     ? "College Schedule Checker"
     : "Schedule Checker";
   const scheduleType = details.schedule_type === "honorarium" ? "honorarium" : "regular";
+  const actorRoleLabel = actor.accessDescription || req.headers["x-audit-actor-role"] || "Registrar";
+  const actorDisplayName = actor.name || actor.email || "Unknown User";
+  const actorNameWithId = `${actorRoleLabel} ${actorDisplayName} (${actor.id || "N/A"})`;
+  const preparedByName = details.prepared_by_name || "Unknown User";
+  const preparedByEmployeeId = details.prepared_by_employee_id || "N/A";
+  const applicantName = details.applicant_name || "Unknown Applicant";
+  const applicantNumber = details.applicant_number || "N/A";
 
   const events = {
     grade_conversion_saved: {
@@ -2705,6 +2643,10 @@ const buildNotificationAuditMessage = async (req) => {
       type: "Printing",
       message: `${userPrefix} printed Faculty Evaluation Report`,
     },
+    examination_profile_prepared_by_set: {
+      type: "update",
+      message: `${actorNameWithId} set ${preparedByName} (${preparedByEmployeeId}) as a campus administrator in examination profile of ${applicantName} (${applicantNumber})`,
+    },
   };
 
   const event = events[eventType];
@@ -2714,28 +2656,16 @@ const buildNotificationAuditMessage = async (req) => {
     ...event,
     eventType,
     actor,
-    notificationId: actor.notificationId || actor.id,
+    auditId: actor.auditId || actor.id,
   };
 };
 
 app.post("/api/audit/event", async (req, res) => {
   try {
-    const auditEvent = await buildNotificationAuditMessage(req);
+    const auditEvent = await buildAuditEventMessage(req);
     if (!auditEvent) {
       return res.status(400).json({ message: "Unsupported audit event" });
     }
-
-    await db.query(
-      `INSERT INTO notifications (type, message, applicant_number, actor_email, actor_name, timestamp)
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-      [
-        auditEvent.type,
-        auditEvent.message,
-        auditEvent.notificationId,
-        auditEvent.actor.email,
-        auditEvent.actor.name,
-      ],
-    );
 
     await insertAuditLogEnrollment({
       actorId: auditEvent.actor.id,

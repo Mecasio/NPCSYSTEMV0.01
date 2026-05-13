@@ -1,7 +1,80 @@
 const express = require("express");
 const { db, db3 } = require("../database/database");
+const { insertAuditLogEnrollment } = require("../../utils/auditLogger");
 
 const router = express.Router();
+
+const formatAuditActorRole = (role) => {
+  const safeRole = String(role || "registrar").trim();
+  if (!safeRole) return "Registrar";
+
+  return safeRole
+    .split(/[\s_-]+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const getMedicalAuditActor = (req) => ({
+  actorId:
+    req.headers["x-audit-actor-id"] ||
+    req.body?.audit_actor_id ||
+    req.body?.user_id ||
+    "unknown",
+  actorRole:
+    req.headers["x-audit-actor-role"] ||
+    req.body?.audit_actor_role ||
+    "registrar",
+});
+
+const getStudentAuditLabel = async (studentNumber) => {
+  try {
+    const [rows] = await db3.query(
+      `
+      SELECT
+        s.student_number,
+        p.last_name,
+        p.first_name,
+        p.middle_name
+      FROM student_numbering_table s
+      LEFT JOIN person_table p ON p.person_id = s.person_id
+      WHERE s.student_number = ?
+      LIMIT 1
+      `,
+      [studentNumber],
+    );
+
+    const student = rows?.[0];
+    if (!student) return studentNumber;
+
+    const fullName = [student.last_name, student.first_name, student.middle_name]
+      .filter(Boolean)
+      .join(", ");
+
+    return fullName ? `${student.student_number} - ${fullName}` : student.student_number;
+  } catch (err) {
+    console.error("Medical audit student lookup failed:", err);
+    return studentNumber;
+  }
+};
+
+const insertMedicalAuditLog = async ({ req, action, message }) => {
+  const { actorId, actorRole } = getMedicalAuditActor(req);
+
+  await insertAuditLogEnrollment({
+    actorId,
+    role: actorRole,
+    action,
+    severity: "INFO",
+    message,
+  });
+};
+
+const stripAuditFields = (data) => {
+  delete data.audit_actor_id;
+  delete data.audit_actor_role;
+  delete data.user_id;
+  return data;
+};
 
 
 // ✅ Search by student number or name in enrollment db3
@@ -99,6 +172,7 @@ router.get("/api/medical-requirements/:student_number", async (req, res) => {
 // ✅ Create or update medical record
 router.put("/api/medical-requirements", async (req, res) => {
   const { student_number, ...data } = req.body;
+  stripAuditFields(data);
 
   if (!student_number) {
     return res.status(400).json({ message: "Student number is required." });
@@ -110,18 +184,34 @@ router.put("/api/medical-requirements", async (req, res) => {
       [student_number],
     );
 
-    if (existing.length > 0) {
+    const isUpdate = existing.length > 0;
+
+    if (isUpdate) {
       await db3.query(
         "UPDATE medical_requirements SET ? WHERE student_number = ?",
         [data, student_number],
       );
-      res.json({ success: true, message: "Record updated" });
     } else {
       await db3.query("INSERT INTO medical_requirements SET ?", [
         { student_number, ...data },
       ]);
-      res.json({ success: true, message: "Record created" });
     }
+
+    const { actorId, actorRole } = getMedicalAuditActor(req);
+    const roleLabel = formatAuditActorRole(actorRole);
+    const studentLabel = await getStudentAuditLabel(student_number);
+    await insertMedicalAuditLog({
+      req,
+      action: isUpdate
+        ? "MEDICAL_REQUIREMENTS_UPDATE"
+        : "MEDICAL_REQUIREMENTS_CREATE",
+      message: `${roleLabel} (${actorId}) ${isUpdate ? "updated" : "created"} medical history record for Student (${studentLabel}).`,
+    });
+
+    res.json({
+      success: true,
+      message: isUpdate ? "Record updated" : "Record created",
+    });
   } catch (err) {
     console.error("Error saving medical record:", err);
     res.status(500).json({ error: err.message });
@@ -206,6 +296,7 @@ router.get("/api/dental-assessment/:student_number", async (req, res) => {
 // ✅ Create or Update Dental Assessment
 router.put("/api/dental-assessment", async (req, res) => {
   const { student_number, ...data } = req.body;
+  stripAuditFields(data);
 
   if (!student_number) {
     return res.status(400).json({ message: "Student number is required." });
@@ -232,12 +323,13 @@ router.put("/api/dental-assessment", async (req, res) => {
       [student_number],
     );
 
-    if (existing.length > 0) {
+    const isUpdate = existing.length > 0;
+
+    if (isUpdate) {
       await db3.query(
         "UPDATE medical_requirements SET ? WHERE student_number = ?",
         [data, student_number],
       );
-      res.json({ success: true, message: "Dental record updated" });
     } else {
       // Optionally fetch person_id from student_numbering_table
       const [studentRow] = await db3.query(
@@ -249,8 +341,23 @@ router.put("/api/dental-assessment", async (req, res) => {
       await db3.query("INSERT INTO medical_requirements SET ?", [
         { student_number, person_id, ...data },
       ]);
-      res.json({ success: true, message: "Dental record created" });
     }
+
+    const { actorId, actorRole } = getMedicalAuditActor(req);
+    const roleLabel = formatAuditActorRole(actorRole);
+    const studentLabel = await getStudentAuditLabel(student_number);
+    await insertMedicalAuditLog({
+      req,
+      action: isUpdate
+        ? "DENTAL_ASSESSMENT_UPDATE"
+        : "DENTAL_ASSESSMENT_CREATE",
+      message: `${roleLabel} (${actorId}) ${isUpdate ? "updated" : "created"} dental assessment record for Student (${studentLabel}).`,
+    });
+
+    res.json({
+      success: true,
+      message: isUpdate ? "Dental record updated" : "Dental record created",
+    });
   } catch (err) {
     console.error("❌ Error saving dental data:", err);
     res.status(500).json({ error: err.message });
@@ -290,6 +397,7 @@ router.get("/api/physical-neuro/:student_number", async (req, res) => {
 
 router.put("/api/physical-neuro", async (req, res) => {
   const { student_number, ...data } = req.body;
+  stripAuditFields(data);
   if (!student_number)
     return res.status(400).json({ message: "Student number is required." });
 
@@ -299,18 +407,36 @@ router.put("/api/physical-neuro", async (req, res) => {
       [student_number],
     );
 
-    if (existing.length > 0) {
+    const isUpdate = existing.length > 0;
+
+    if (isUpdate) {
       await db3.query(
         "UPDATE medical_requirements SET ? WHERE student_number = ?",
         [data, student_number],
       );
-      res.json({ success: true, message: "Physical/Neuro record updated" });
     } else {
       await db3.query("INSERT INTO medical_requirements SET ?", [
         { student_number, ...data },
       ]);
-      res.json({ success: true, message: "Physical/Neuro record created" });
     }
+
+    const { actorId, actorRole } = getMedicalAuditActor(req);
+    const roleLabel = formatAuditActorRole(actorRole);
+    const studentLabel = await getStudentAuditLabel(student_number);
+    await insertMedicalAuditLog({
+      req,
+      action: isUpdate
+        ? "PHYSICAL_NEURO_UPDATE"
+        : "PHYSICAL_NEURO_CREATE",
+      message: `${roleLabel} (${actorId}) ${isUpdate ? "updated" : "created"} physical and neurological examination record for Student (${studentLabel}).`,
+    });
+
+    res.json({
+      success: true,
+      message: isUpdate
+        ? "Physical/Neuro record updated"
+        : "Physical/Neuro record created",
+    });
   } catch (err) {
     console.error("Error saving physical/neuro data:", err);
     res.status(500).json({ error: err.message });

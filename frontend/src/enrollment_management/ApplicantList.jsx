@@ -28,7 +28,6 @@ import {
 import { io } from "socket.io-client";
 import { Snackbar, Alert } from "@mui/material";
 import { useNavigate, useLocation } from "react-router-dom";
-import NotificationsIcon from "@mui/icons-material/Notifications";
 import { FcPrint } from "react-icons/fc";
 import EaristLogo from "../assets/EaristLogo.png";
 import { Link } from "react-router-dom";
@@ -799,38 +798,6 @@ const ApplicantList = () => {
       setCurrentPage(totalPages || 1);
     }
   }, [filteredPersons.length, totalPages]);
-
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
-
-  useEffect(() => {
-    // Load saved notifications from DB on first load
-    axios
-      .get(`${API_BASE_URL}/api/notifications`)
-      .then((res) => {
-        setNotifications(
-          res.data.map((n) => ({
-            ...n,
-            timestamp: n.timestamp,
-          })),
-        );
-      })
-      .catch((err) =>
-        console.error("Failed to load saved notifications:", err),
-      );
-  }, []);
-
-  useEffect(() => {
-    if (!socket.current) return;
-
-    const handler = (data) => {
-      setNotifications((prev) => [data, ...prev]);
-    };
-
-    socket.current.on("notification", handler);
-
-    return () => socket.current.off("notification", handler);
-  }, []);
 
   const [openDialog, setOpenDialog] = useState(false);
   const [activePerson, setActivePerson] = useState(null);

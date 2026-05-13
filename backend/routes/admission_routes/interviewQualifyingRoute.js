@@ -524,10 +524,14 @@ router.post(
             ) / 2
           : null;
 
+      const hasStatusPayload =
+        status !== undefined &&
+        String(status).trim() !== "";
+
       const newStatus =
-        status === ""
-          ? null
-          : status;
+        hasStatusPayload
+          ? String(status).trim()
+          : oldStatus;
 
       // -------------------------------------------------
       // CHECK CHANGES FIRST
@@ -659,7 +663,7 @@ router.post(
         ]
       );
 
-      if (status !== undefined) {
+      if (hasStatusPayload) {
         await db.query(
           `
           UPDATE interview_applicants

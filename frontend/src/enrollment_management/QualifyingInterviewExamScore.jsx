@@ -191,6 +191,11 @@ const QualifyingExamScore = () => {
 
   const buildPayload = (person) => {
     const edits = editScores[person.person_id] || {};
+    const selectedStatus =
+      edits.status ??
+      person.college_approval_status ??
+      person.status ??
+      "";
 
     return {
       applicant_number: person.applicant_number,
@@ -202,7 +207,10 @@ const QualifyingExamScore = () => {
         0,
 
       // ✅ ADD THIS
-      status: edits.status ?? person.status ?? "",
+      status:
+        selectedStatus && selectedStatus !== "On Process"
+          ? selectedStatus
+          : "Waiting List",
 
       user_person_id: userID,
       audit_actor_id:
@@ -869,7 +877,10 @@ const QualifyingExamScore = () => {
     try {
       await axios.put(
         `${API_BASE_URL}/api/interview_applicants/${applicantId}/status`,
-        { status: newStatus },
+        {
+          status: newStatus,
+          ...auditPayload(),
+        },
       );
 
       setPersons((prev) =>
@@ -1913,6 +1924,13 @@ Thank you, best regards
           html: finalPreview.replace(/\n/g, "<br/>"),
           senderName: emailSender,
           user_person_id: loggedInPersonId,
+          applicant_number: applicant.applicant_number,
+          applicant_name: [
+            applicant.first_name,
+            applicant.middle_name,
+            applicant.last_name,
+          ].filter(Boolean).join(" "),
+          ...auditPayload(),
         });
 
         // Mark as emailed
@@ -1993,6 +2011,13 @@ Thank you, best regards
           html: finalPreview.replace(/\n/g, "<br/>"),
           senderName: emailSender,
           user_person_id: userID,
+          applicant_number: applicant.applicant_number,
+          applicant_name: [
+            applicant.first_name,
+            applicant.middle_name,
+            applicant.last_name,
+          ].filter(Boolean).join(" "),
+          ...auditPayload(),
         });
 
         // Mark as emailed

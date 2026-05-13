@@ -276,6 +276,18 @@ const VerifyDocumentsSchedule = () => {
   const minDate = `${currentYear}-01-01`;
   const maxDate = `${currentYear}-12-31`;
 
+  const resetScheduleForm = () => {
+    setEditingSchedule(null);
+    setSelectedBranch("");
+    setDay("");
+    setBuildingName("");
+    setRoomId("");
+    setStartTime("");
+    setEndTime("");
+    setRoomQuota("");
+    setEvaluator("");
+  };
+
   const handleSaveSchedule = async (e) => {
     e.preventDefault();
 
@@ -316,14 +328,7 @@ const VerifyDocumentsSchedule = () => {
       setSnackbarSeverity("success");
       setOpenSnackbar(true);
 
-      // Reset form
-      setDay("");
-      setBuildingName("");
-      setRoomId("");
-      setStartTime("");
-      setEndTime("");
-      setRoomQuota("");
-      setEvaluator("");
+      closeScheduleDialog();
 
       // Refresh schedules
       const res = await axios.get(
@@ -479,16 +484,7 @@ const VerifyDocumentsSchedule = () => {
       setSnackbarSeverity("success");
       setOpenSnackbar(true);
 
-      setEditingSchedule(null);
-
-      // Reset form
-      setDay("");
-      setBuildingName("");
-      setRoomId("");
-      setStartTime("");
-      setEndTime("");
-      setRoomQuota("");
-      setEvaluator("");
+      closeScheduleDialog();
 
       // Refresh schedules
       const res = await axios.get(
@@ -513,6 +509,11 @@ const VerifyDocumentsSchedule = () => {
   };
 
   const [openFormDialog, setOpenFormDialog] = useState(false);
+
+  const closeScheduleDialog = () => {
+    setOpenFormDialog(false);
+    resetScheduleForm();
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return "";
@@ -733,7 +734,10 @@ const VerifyDocumentsSchedule = () => {
                   {showCreateActions && (
                     <Button
                       variant="contained"
-                      onClick={() => setOpenFormDialog(true)}
+                      onClick={() => {
+                        closeScheduleDialog();
+                        setOpenFormDialog(true);
+                      }}
                       sx={{
                         backgroundColor: "#1976d2", // ✅ Blue
                         color: "#fff",
@@ -1507,7 +1511,7 @@ const VerifyDocumentsSchedule = () => {
 
       <Dialog
         open={openFormDialog}
-        onClose={() => setOpenFormDialog(false)}
+        onClose={closeScheduleDialog}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -1688,7 +1692,7 @@ const VerifyDocumentsSchedule = () => {
           }}
         >
           <Button
-            onClick={() => setOpenFormDialog(false)}
+            onClick={closeScheduleDialog}
             color="error"
             variant="outlined"
           >
@@ -1704,7 +1708,6 @@ const VerifyDocumentsSchedule = () => {
                   setOpenUpdateDialog(true);
                 } else {
                   handleSaveSchedule(e);
-                  setOpenFormDialog(false);
                 }
               }}
             >
