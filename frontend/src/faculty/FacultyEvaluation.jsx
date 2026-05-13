@@ -16,6 +16,7 @@ import {
   Table,
   TableContainer,
   TableHead,
+  TableBody,
   TableRow,
   TableCell,
   Card,
@@ -94,6 +95,7 @@ const FacultyEvaluation = () => {
   const [selectedSchoolYear, setSelectedSchoolYear] = useState("");
   const [selectedSchoolSemester, setSelectedSchoolSemester] = useState("");
   const [selectedActiveSchoolYear, setSelectedActiveSchoolYear] = useState("");
+  const [displayMode, setDisplayMode] = useState("graph");
   const [profData, setPerson] = useState({
     prof_id: "",
     employee_id: "",
@@ -276,6 +278,13 @@ const FacultyEvaluation = () => {
     setSelectedSchoolSemester(event.target.value);
   };
 
+  const calculateRatingTotal = (counts = {}) => {
+    return [1, 2, 3, 4, 5].reduce(
+      (sum, rating) => sum + Number(counts[rating] || 0),
+      0,
+    );
+  };
+
   const AuditLog = async () => {
     try {
       await postAuditEvent("faculty_evaluation_printed", {
@@ -321,10 +330,69 @@ const FacultyEvaluation = () => {
       (sem) => sem.semester_id === selectedSchoolSemester,
     );
 
-    // Calculate total responses for each course
-    const calculateTotal = (chartData) => {
-      return chartData.reduce((sum, item) => sum + item.total, 0);
-    };
+    const escapeHtml = (value) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+    const printableContent =
+      displayMode === "table"
+        ? `
+                        <style>.chart-container { display: none !important; }</style>
+                        <div class="table-container">
+                            ${
+                              chartData.length > 0
+                                ? chartData
+                                    .map(
+                                      (entry) => `
+                                <div class="table-card">
+                                    <div class="chart-title">EVALUATION FOR COURSE ${escapeHtml(entry.course_code)}</div>
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Question</th>
+                                                <th>Rating 1</th>
+                                                <th>Rating 2</th>
+                                                <th>Rating 3</th>
+                                                <th>Rating 4</th>
+                                                <th>Rating 5</th>
+                                                <th>Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${entry.questions
+                                              .map(
+                                                (question) => `
+                                                <tr>
+                                                    <td>${escapeHtml(question.question_description)}</td>
+                                                    <td>${Number(question.counts?.[1] || 0)}</td>
+                                                    <td>${Number(question.counts?.[2] || 0)}</td>
+                                                    <td>${Number(question.counts?.[3] || 0)}</td>
+                                                    <td>${Number(question.counts?.[4] || 0)}</td>
+                                                    <td>${Number(question.counts?.[5] || 0)}</td>
+                                                    <td>${calculateRatingTotal(question.counts)}</td>
+                                                </tr>
+                                            `,
+                                              )
+                                              .join("")}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `,
+                                    )
+                                    .join("")
+                                : `
+                                <div class="no-data">
+                                    There's no evaluation in this term.
+                                </div>
+                            `
+                            }
+                        </div>
+                    `
+        : "";
 
     // Open new print window
     const newWin = window.open("", "Print-Window");
@@ -423,6 +491,34 @@ const FacultyEvaluation = () => {
                             width: 95%;
                             margin: 0 auto;
                         }
+                        .table-container {
+                            width: 95%;
+                            margin: 0 auto;
+                            text-align: left;
+                        }
+                        .table-card {
+                            width: 100%;
+                            margin-bottom: 18px;
+                            page-break-inside: avoid;
+                        }
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            font-size: 11px;
+                        }
+                        th, td {
+                            border: 1px solid #222;
+                            padding: 6px;
+                            vertical-align: top;
+                        }
+                        th {
+                            background: #eeeeee;
+                            text-align: center;
+                        }
+                        td:not(:first-child) {
+                            text-align: center;
+                            width: 70px;
+                        }
                     </style>
                 </head>
                 <body onload="window.print(); setTimeout(() => window.close(), 100);">
@@ -461,14 +557,12 @@ const FacultyEvaluation = () => {
                         </div>
                         
                         <!-- ✅ CHARTS -->
+                        ${printableContent}
                         <div class="chart-container">
                             ${
                               chartData.length > 0
                                 ? chartData
-                                    .map((entry, index) => {
-                                      const total = calculateTotal(
-                                        entry.chartData,
-                                      );
+                                    .map((entry) => {
                                       return `
                                 <div class="chart-card">
                                     <div class="chart-title">EVALUATION FOR COURSE ${entry.course_code}</div>
@@ -650,7 +744,9 @@ const FacultyEvaluation = () => {
             style={{
               display: "flex",
               alignItems: "center",
-              minWidth: "500px",
+              gap: "12px",
+              flexWrap: "wrap",
+              minWidth: "620px",
             }}
           >
             <Typography fontSize={13} sx={{ minWidth: "100px" }}>
@@ -690,6 +786,36 @@ const FacultyEvaluation = () => {
                 Print Evaluation
               </span>
             </button>
+
+            <Typography fontSize={13} sx={{ minWidth: "70px" }}>
+              Display:
+            </Typography>
+            <Box display="flex" gap={1}>
+              <Button
+                variant={displayMode === "graph" ? "contained" : "outlined"}
+                size="small"
+                onClick={() => setDisplayMode("graph")}
+                sx={{
+                  minWidth: 80,
+                  backgroundColor:
+                    displayMode === "graph" ? mainButtonColor : "transparent",
+                }}
+              >
+                Graph
+              </Button>
+              <Button
+                variant={displayMode === "table" ? "contained" : "outlined"}
+                size="small"
+                onClick={() => setDisplayMode("table")}
+                sx={{
+                  minWidth: 80,
+                  backgroundColor:
+                    displayMode === "table" ? mainButtonColor : "transparent",
+                }}
+              >
+                Table
+              </Button>
+            </Box>
           </Box>
 
           <Box display="flex" gap={2} sx={{ minWidth: "450px" }}>
@@ -753,6 +879,7 @@ const FacultyEvaluation = () => {
         </Box>
       </TableContainer>
 
+      {displayMode === "graph" ? (
       <div className="print-container" ref={divToPrintRef}>
         <Grid
           container
@@ -778,7 +905,6 @@ const FacultyEvaluation = () => {
                     height: 400,
                     border: `1px solid ${borderColor}`,
                     transition: "transform 0.2s ease",
-                    boxShadow: 3,
                     "&:hover": { transform: "scale(1.03)" },
                     boxShadow: 3,
                   }}
@@ -850,6 +976,93 @@ const FacultyEvaluation = () => {
           )}
         </Grid>
       </div>
+      ) : (
+        <Box className="print-container" ref={divToPrintRef} sx={{ mt: 3 }}>
+          {chartData.length > 0 ? (
+            chartData.map((entry, index) => (
+              <TableContainer
+                component={Paper}
+                key={index}
+                sx={{
+                  mb: 3,
+                  border: `1px solid ${borderColor}`,
+                  overflowX: "auto",
+                }}
+              >
+                <Typography
+                  variant="h6"
+                  fontWeight="bold"
+                  sx={{
+                    color: "maroon",
+                    textAlign: "center",
+                    p: 2,
+                  }}
+                >
+                  EVALUATION FOR COURSE {entry.course_code}
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow
+                      sx={{
+                        backgroundColor: settings?.header_color || "#1976d2",
+                      }}
+                    >
+                      <TableCell sx={{ color: "white", fontWeight: "bold" }}>
+                        Question
+                      </TableCell>
+                      {[1, 2, 3, 4, 5].map((rating) => (
+                        <TableCell
+                          key={rating}
+                          align="center"
+                          sx={{ color: "white", fontWeight: "bold" }}
+                        >
+                          Rating {rating}
+                        </TableCell>
+                      ))}
+                      <TableCell
+                        align="center"
+                        sx={{ color: "white", fontWeight: "bold" }}
+                      >
+                        Total
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {entry.questions.map((question) => (
+                      <TableRow key={question.question_id}>
+                        <TableCell>{question.question_description}</TableCell>
+                        {[1, 2, 3, 4, 5].map((rating) => (
+                          <TableCell key={rating} align="center">
+                            {Number(question.counts?.[rating] || 0)}
+                          </TableCell>
+                        ))}
+                        <TableCell align="center">
+                          {calculateRatingTotal(question.counts)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            ))
+          ) : (
+            <Typography
+              variant="body1"
+              color="text.secondary"
+              sx={{
+                mt: 1,
+                ml: 1,
+                width: "97%",
+                border: `1px solid ${borderColor}`,
+                p: 10,
+                textAlign: "center",
+              }}
+            >
+              There's no evaluation in this term.
+            </Typography>
+          )}
+        </Box>
+      )}
 
       <style>
         {`

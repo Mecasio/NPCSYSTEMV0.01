@@ -365,14 +365,14 @@ const normalizeNstpSourceCode = (courseCode) => {
 
 const getNstpComponentFromCode = (normalizedCourseCode) => {
   if (!normalizedCourseCode) return 0;
-  if (/^NSTP(CWTS|CTWS)\d*$/.test(normalizedCourseCode)) return 1;
+  if (/^NSTP(CWTS|CTWS|CTS)\d*$/.test(normalizedCourseCode)) return 1;
   if (/^NSTPLTS\d*$/.test(normalizedCourseCode)) return 2;
   if (/^NSTPMTS\d*$/.test(normalizedCourseCode)) return 3;
   return 0;
 };
 
 const hasKnownNstpComponentKeyword = (normalizedCourseCode) =>
-  /NSTP(CWTS|CTWS|LTS|MTS)/.test(normalizedCourseCode || "");
+  /NSTP(CWTS|CTWS|CTS|LTS|MTS)/.test(normalizedCourseCode || "");
 
 const hasUnknownNstpComponentKeyword = (normalizedCourseCode) => {
   const code = normalizedCourseCode || "";
@@ -396,9 +396,9 @@ const transformNstpSubject = (courseCode, semesterDescription) => {
   }
 
   let normalizedCourseCode = "NSTPROG";
-  if (/NSTPROG1|NSTPCWTS1/.test(normalizedSource))
+  if (/NSTPROG1|NSTPCWTS1|NSTPCTWS1|NSTPCTS1/.test(normalizedSource))
     normalizedCourseCode = "NSTPROG1";
-  else if (/NSTPROG2|NSTPCWTS2/.test(normalizedSource))
+  else if (/NSTPROG2|NSTPCWTS2|NSTPCTWS2|NSTPCTS2/.test(normalizedSource))
     normalizedCourseCode = "NSTPROG2";
   else if (/FIRST\s+SEMESTER/i.test(semesterDescription || ""))
     normalizedCourseCode = "NSTPROG1";
@@ -2979,7 +2979,7 @@ router.post("/api/import-xlsx", upload.single("file"), async (req, res) => {
         error:
           "Upload failed. Detected NSTP course code has an unsupported component tag.",
         warning:
-          "Please use only NSTP component tags: CWTS/CTWS, LTS, or MTS. Generic NSTP codes are allowed but will not set a component.",
+          "Please use only NSTP component tags: CWTS/CTWS/CTS, LTS, or MTS. Generic NSTP codes are allowed but will not set a component.",
         invalid_nstp_components: uniqueInvalid,
       });
     }
@@ -3135,6 +3135,56 @@ router.post("/api/import-xlsx", upload.single("file"), async (req, res) => {
       });
       return res.status(400).json({ error: "No matching curriculum found" });
     }
+
+    const [[personCurriculumCheck]] = await connection.query(
+      `SELECT
+         SUM(CASE WHEN sst.active_curriculum = ? THEN 1 ELSE 0 END) AS same_curriculum_count,
+         SUM(CASE WHEN sst.active_curriculum <> ? THEN 1 ELSE 0 END) AS different_curriculum_count
+       FROM student_numbering_table snt
+       INNER JOIN student_status_table sst ON sst.student_number = snt.student_number
+       WHERE snt.person_id = ?`,
+      [curriculum.curriculum_id, curriculum.curriculum_id, person_id],
+    );
+
+    const hasDifferentCurriculumLink =
+      Number(personCurriculumCheck?.different_curriculum_count || 0) > 0;
+
+    if (hasDifferentCurriculumLink) {
+      const previousPersonId = person_id;
+      const [personInsert] = await connection.query(
+        `INSERT INTO person_table (campus, last_name, first_name, middle_name)
+         VALUES (?, ?, ?, ?)`,
+        [campus, lastName, firstName, middleName],
+      );
+
+      person_id = personInsert.insertId;
+      isNewStudent = true;
+
+      await connection.query(
+        `UPDATE student_numbering_table
+         SET person_id = ?
+         WHERE student_number = ?`,
+        [person_id, studentNumber],
+      );
+
+      await connection.query(
+        `INSERT INTO person_status_table (person_id, student_registration_status)
+         VALUES (?, 1)
+         ON DUPLICATE KEY UPDATE student_registration_status = 1`,
+        [person_id],
+      );
+
+      console.log(
+        `Re-linked student number ${studentNumber} from person_id ${previousPersonId} to new person_id ${person_id} because another linked student number uses a different curriculum.`,
+      );
+    }
+
+    await connection.query(
+      `UPDATE person_table
+       SET program = ?
+       WHERE person_id = ?`,
+      [curriculum.curriculum_id, person_id],
+    );
 
     // --- Step 4: Process each School Year + Semester block ---
     // Dynamic conversion keeps legacy transcript imports aligned with grade_conversion.

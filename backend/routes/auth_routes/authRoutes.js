@@ -1119,7 +1119,8 @@ router.post("/login_applicant", async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ message: "All fields are required" });
   }
-  const loginKey = email.trim().toLowerCase();
+  const loginCredential = email.trim();
+  const loginKey = loginCredential.toLowerCase();
   const now = Date.now();
   const record = loginAttempts[loginKey] || { count: 0, lockUntil: null };
 
@@ -1141,12 +1142,14 @@ router.post("/login_applicant", async (req, res) => {
   try {
     // ✅ Fetch user
     const query = `
-      SELECT * FROM user_accounts AS ua
+      SELECT ua.*, pt.*, ant.applicant_number AS existing_applicant_number
+      FROM user_accounts AS ua
       LEFT JOIN person_table AS pt ON pt.person_id = ua.person_id
-      WHERE email = ?
+      LEFT JOIN applicant_numbering_table AS ant ON ant.person_id = ua.person_id
+      WHERE ua.email = ? OR ant.applicant_number = ?
     `;
 
-    const [results] = await db.query(query, [email]);
+    const [results] = await db.query(query, [loginCredential, loginCredential]);
 
     if (results.length === 0) {
       record.count++;
