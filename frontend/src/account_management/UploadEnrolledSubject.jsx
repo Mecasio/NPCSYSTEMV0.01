@@ -5,7 +5,6 @@ import {
   Box,
   Typography,
   Button,
-  TextField,
   Table,
   TableBody,
   TableCell,
@@ -65,16 +64,18 @@ const UploadEnrolledSubject = () => {
     const [companyName, setCompanyName] = useState("");
     const [shortTerm, setShortTerm] = useState("");
     const [campusAddress, setCampusAddress] = useState("");
+    const [branches, setBranches] = useState([]);
   
     const [userID, setUserID] = useState("");
     const [user, setUser] = useState("");
     const [userRole, setUserRole] = useState("");
     const [employeeID, setEmployeeID] = useState("");
     const [hasAccess, setHasAccess] = useState(null);
+    const [canCreate, setCanCreate] = useState(false);
   
     const [loading, setLoading] = useState(false);
     const [selectedFile, setSelectedFile] = useState(null);
-    const [campus, setCampus] = useState('1');
+    const [campus, setCampus] = useState("");
     const [studentUploaded, setStudentUploaded] = useState([]);
     const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState("");
     const [selectedProgramFilter, setSelectedProgramFilter] = useState("");
@@ -105,7 +106,18 @@ const UploadEnrolledSubject = () => {
 
     const progressTimerRef = useRef(null);
     const fileInputRef = useRef(null);
-    const pageId = 117;
+    const pageId = 151;
+
+    const getPermissionHeaders = () => ({
+        "x-employee-id": employeeID || localStorage.getItem("employee_id") || "",
+        "x-page-id": pageId,
+        "x-audit-actor-id":
+            employeeID ||
+            localStorage.getItem("employee_id") ||
+            localStorage.getItem("email") ||
+            "unknown",
+        "x-audit-actor-role": userRole || localStorage.getItem("role") || "registrar",
+    });
 
     const filteredUploadedStudents = useMemo(() => {
         return studentUploaded.filter((row) => {
@@ -186,6 +198,24 @@ const UploadEnrolledSubject = () => {
         if (settings.company_name) setCompanyName(settings.company_name);
         if (settings.short_term) setShortTerm(settings.short_term);
         if (settings.campus_address) setCampusAddress(settings.campus_address);
+        if (settings?.branches) {
+            try {
+                const parsedBranches =
+                    typeof settings.branches === "string"
+                        ? JSON.parse(settings.branches)
+                        : settings.branches;
+                const branchList = Array.isArray(parsedBranches) ? parsedBranches : [];
+                setBranches(branchList);
+                setCampus((prev) => prev || String(branchList?.[0]?.id ?? ""));
+            } catch (err) {
+                console.error("Failed to parse branch settings:", err);
+                setBranches([]);
+                setCampus("");
+            }
+        } else {
+            setBranches([]);
+            setCampus("");
+        }
     }, [settings]);
 
     useEffect(() => {
@@ -220,19 +250,10 @@ const UploadEnrolledSubject = () => {
             await fetchSchoolYears();
             await fetchSemesters();
             await fetchYearLevels();
-            await fetchActiveSchoolYear();
         };
 
         loadFilters();
     }, []);
-
-    useEffect(() => {
-        if (departmentFilters.length > 0 && !selectedDepartmentFilter) {
-            const firstDeptId = departmentFilters[0].dprtmnt_id;
-            setSelectedDepartmentFilter(firstDeptId);
-            fetchPrograms(firstDeptId);
-        }
-    }, [departmentFilters, selectedDepartmentFilter]);
 
     useEffect(() => {
         setCurrentPage(1);
@@ -303,14 +324,17 @@ const UploadEnrolledSubject = () => {
             const response = await axios.get(
                 `${API_BASE_URL}/api/page_access/${employeeID}/${pageId}`,
             );
-            if (response.data && response.data.page_privilege === 1) {
+            if (response.data && Number(response.data.page_privilege) === 1) {
                 setHasAccess(true);
+                setCanCreate(Number(response.data?.can_create) === 1);
             } else {
                 setHasAccess(false);
+                setCanCreate(false);
             }
         } catch (error) {
             console.error("Error checking access:", error);
             setHasAccess(false);
+            setCanCreate(false);
             if (error.response && error.response.data.message) {
                 console.log(error.response.data.message);
             } else {
@@ -438,6 +462,15 @@ const UploadEnrolledSubject = () => {
     };
 
     const handleImportXlsx = async () => {
+        if (!canCreate) {
+        setSnackbar({
+            open: true,
+            message: 'You do not have permission to import enrolled subjects.',
+            severity: 'error',
+        });
+        return;
+        }
+
         if (!selectedFile) {
         setSnackbar({
             open: true,
@@ -445,6 +478,15 @@ const UploadEnrolledSubject = () => {
             severity: 'warning',
         });
         return;
+        }
+
+        if (!campus) {
+            setSnackbar({
+                open: true,
+                message: 'Please select a campus first.',
+                severity: 'warning',
+            });
+            return;
         }
 
         try {
@@ -459,7 +501,10 @@ const UploadEnrolledSubject = () => {
             `${API_BASE_URL}/import-xlsx-into-enrolled-subject`,
             formData,
             {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...getPermissionHeaders(),
+            },
             },
         );
 
@@ -486,6 +531,10 @@ const UploadEnrolledSubject = () => {
             }
 
             await insertAuditLog("enrolled_subjects_imported", {
+                page_id: pageId,
+                module: "Upload Enrolled Subject",
+                file_name: selectedFile?.name || "N/A",
+                campus,
                 imported_count: importedCount,
                 skipped_count: skippedCount,
             });
@@ -675,18 +724,26 @@ const UploadEnrolledSubject = () => {
         <Paper sx={{ p: 3, mb: 3, border: `1px solid ${borderColor}` }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} flexWrap="wrap">
                 <Box>
-                    <TextField
-                        select
-                        label="Campus"
-                        size="small"
-                        value={campus}
-                        onChange={(e) => setCampus(e.target.value)}
-                        SelectProps={{ native: true }}
-                        sx={{ width: 160 }}
-                    >
-                        <option value="1">Manila</option>
-                        <option value="2">Cavite</option>
-                    </TextField>
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <Select
+                            displayEmpty
+                            value={campus}
+                            onChange={(e) => setCampus(e.target.value)}
+                            MenuProps={FILTER_MENU_PROPS}
+                        >
+                            <MenuItem value="" disabled>
+                                Select Campus
+                            </MenuItem>
+                            {branches.map((branch) => (
+                                <MenuItem
+                                    key={branch.id ?? branch.branch}
+                                    value={String(branch.id ?? "")}
+                                >
+                                    {branch.branch}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
                 </Box>
 
                 <input
@@ -707,6 +764,7 @@ const UploadEnrolledSubject = () => {
 
                     <Button
                         variant="outlined"
+                        disabled={!canCreate || importing}
                         onClick={() => {
                             if (fileInputRef.current) {
                                 fileInputRef.current.value = '';
@@ -720,7 +778,7 @@ const UploadEnrolledSubject = () => {
                     <Button
                         variant="contained"
                         onClick={handleImportXlsx}
-                        disabled={importing}
+                        disabled={!canCreate || importing}
                         sx={{ backgroundColor: mainButtonColor, width: "150px" }}
                     >
                         {importing ? 'Importing...' : 'Import File'}

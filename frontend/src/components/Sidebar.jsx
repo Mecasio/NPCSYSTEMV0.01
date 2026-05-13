@@ -624,7 +624,7 @@ const SideBar = ({
       ]
     },
     {
-      key: "settingsCommunication", label: "Settings & Communication", icon: Campaign, items: [
+      key: "settingsCommunication", label: "System Configuration", icon: Campaign, items: [
         { title: `${shortTerm} Profile`, link: "/settings", icon: Settings, page_id: 74 },
         { title: "Program Slot Remaining", link: "/program_slot_limit", icon: People, page_id: 110 },
         { title: "Branch Management", link: "/admin_branches", icon: Settings, page_id: 138 },
@@ -666,6 +666,7 @@ const SideBar = ({
         { title: "Settings", link: "/registrar_reset_password", icon: Settings, page_id: 73 },
         { title: "Student Grade File", link: "/student_grade_file", icon: Settings, page_id: 126 },
         { title: "Migration Data Panel", link: "/migration_data_panel", icon: Settings, page_id: 114 },
+        { title: "Upload Enrolled Subject", link: "/upload_enrolled_subject", icon: Settings, page_id: 151 },
         { title: "Academic Achiever Awardee's", link: "/honors_report", icon: Settings, page_id: 146 },
       ]
     },

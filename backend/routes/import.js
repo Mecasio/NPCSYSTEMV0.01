@@ -158,6 +158,137 @@ const mapRemarkToNumeric = (remark) => {
   return 0;
 };
 
+const normalizeGradeToken = (value) =>
+  normalizeText(value).toUpperCase().replace(/\s+/g, " ");
+
+const parseImportedGradeCell = (value) => {
+  const token = normalizeGradeToken(value);
+  if (!token || ["-", "N/A", "NA"].includes(token)) return null;
+  if (["INC", "INCOMPLETE"].includes(token)) return "INC";
+  if (["DRP", "DROP", "DROPPED"].includes(token)) return "DRP";
+
+  const parsed = Number(token);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const deriveBulkEnrolledSubjectOutcome = ({
+  midtermRaw,
+  finalsRaw,
+  finalGradeRaw,
+  remarkRaw,
+  gradeConversions,
+}) => {
+  const midterm = parseImportedGradeCell(midtermRaw);
+  const finals = parseImportedGradeCell(finalsRaw);
+  const finalGradeToken = normalizeGradeToken(finalGradeRaw);
+  const remarkToken = normalizeGradeToken(remarkRaw);
+  const decisionToken = finalGradeToken || remarkToken;
+
+  let finalGrade = 0.0;
+  let enRemarks = 5;
+  let status = 0;
+  let gradesStatus = null;
+
+  if (!decisionToken || ["-", "N/A", "NA", "NO GRADE"].includes(decisionToken)) {
+    return {
+      midterm,
+      finals,
+      finalGrade,
+      enRemarks,
+      status,
+      gradesStatus,
+      remarks: "migrated from old system",
+    };
+  }
+
+  if (["CE", "ONGOING", "CURRENTLY ENROLLED"].includes(decisionToken)) {
+    return {
+      midterm,
+      finals,
+      finalGrade: 0,
+      enRemarks: 0,
+      status: 0,
+      gradesStatus,
+      remarks: "migrated from old system",
+    };
+  }
+
+  if (["PASSED", "PASS"].includes(decisionToken)) {
+    return {
+      midterm,
+      finals,
+      finalGrade,
+      enRemarks: 1,
+      status: 0,
+      gradesStatus,
+      remarks: "migrated from old system",
+    };
+  }
+
+  if (["FAILED", "FAIL"].includes(decisionToken)) {
+    return {
+      midterm,
+      finals,
+      finalGrade,
+      enRemarks: 2,
+      status: 1,
+      gradesStatus,
+      remarks: "migrated from old system",
+    };
+  }
+
+  if (["INC", "INCOMPLETE"].includes(decisionToken)) {
+    return {
+      midterm,
+      finals,
+      finalGrade: "INC",
+      enRemarks: 3,
+      status: 0,
+      gradesStatus: "INC",
+      remarks: "migrated from old system",
+    };
+  }
+
+  if (["DRP", "DROP", "DROPPED"].includes(decisionToken)) {
+    return {
+      midterm: midterm || "DRP",
+      finals: finals || "DRP",
+      finalGrade: "DRP",
+      enRemarks: 4,
+      status: 0,
+      gradesStatus: "DRP",
+      remarks: "migrated from old system",
+    };
+  }
+
+  const numericGrade = Number(decisionToken);
+  if (!Number.isNaN(numericGrade)) {
+    const gradeOutcome = deriveLegacyImportOutcome(
+      numericGrade,
+      gradeConversions,
+    );
+    return {
+      midterm,
+      finals,
+      finalGrade: gradeOutcome.storedNumericGrade ?? numericGrade,
+      enRemarks: gradeOutcome.enRemark,
+      status: gradeOutcome.status,
+      gradesStatus,
+      remarks: "migrated from old system",
+    };
+  }
+
+  return {
+    midterm,
+    finals,
+    finalGrade,
+    enRemarks: 6,
+    status,
+    gradesStatus,
+    remarks: "migrated from old system",
+  };
+};
+
 const normalizeAcademicYearValue = (yearText) => {
   const text = normalizeText(yearText);
   if (!text) return "";
@@ -445,9 +576,79 @@ function parseStudentNameLegacy(fullName) {
   };
 }
 
+router.get("/get_uploaded_students", async (req, res) => {
+  try {
+    const [rows] = await db3.query(`
+      SELECT
+        es.id,
+        es.student_number,
+        es.curriculum_id,
+        es.course_id,
+        es.active_school_year_id,
+        es.department_section_id,
+        snt.person_id,
+        pt.last_name,
+        pt.first_name,
+        pt.middle_name,
+        ct.program_id,
+        pgt.program_code,
+        pgt.program_description,
+        pgt.major AS program_major,
+        dct.dprtmnt_id,
+        dt.dprtmnt_name,
+        sy.year_id,
+        sy.semester_id,
+        yt.year_description,
+        smt.semester_description,
+        ss.year_level_id,
+        ylt.year_level_description,
+        co.course_code,
+        co.course_description,
+        NULL AS created_at
+      FROM enrolled_subject AS es
+      LEFT JOIN student_numbering_table AS snt
+        ON snt.student_number = es.student_number
+      LEFT JOIN person_table AS pt
+        ON pt.person_id = snt.person_id
+      LEFT JOIN curriculum_table AS ct
+        ON ct.curriculum_id = es.curriculum_id
+      LEFT JOIN program_table AS pgt
+        ON pgt.program_id = ct.program_id
+      LEFT JOIN dprtmnt_curriculum_table AS dct
+        ON dct.curriculum_id = es.curriculum_id
+      LEFT JOIN dprtmnt_table AS dt
+        ON dt.dprtmnt_id = dct.dprtmnt_id
+      LEFT JOIN active_school_year_table AS sy
+        ON sy.id = es.active_school_year_id
+      LEFT JOIN year_table AS yt
+        ON yt.year_id = sy.year_id
+      LEFT JOIN semester_table AS smt
+        ON smt.semester_id = sy.semester_id
+      LEFT JOIN student_status_table AS ss
+        ON ss.student_number = es.student_number
+       AND ss.active_school_year_id = es.active_school_year_id
+       AND ss.active_curriculum = es.curriculum_id
+      LEFT JOIN year_level_table AS ylt
+        ON ylt.year_level_id = ss.year_level_id
+      LEFT JOIN course_table AS co
+        ON co.course_id = es.course_id
+      ORDER BY es.id DESC
+    `);
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("Failed to fetch uploaded students:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch uploaded students",
+    });
+  }
+});
+
 // -------------------------------------------- FOR FILE UPLOAD IN ENROLLED SUBJECT --------------------------------- //
 router.post(
   "/import-xlsx-into-enrolled-subject",
+  CanCreate,
   upload.single("file"),
   async (req, res) => {
     const campus = normalizeText(req.body.campus) || null;
@@ -467,10 +668,10 @@ router.post(
         const studentNumber = normalizeText(
           pickValue(row, ["Student Number", "StudentNumber", "student_number"]),
         );
-        const courseCode = normalizeText(
-          pickValue(row, ["Course ", "Course", "Course Code", "course_code"]),
+        const subjectID = normalizeText(
+          pickValue(row, ["SubjectID", "Subject Id", "subject_id"]),
         );
-        return studentNumber || courseCode;
+        return studentNumber || subjectID;
       });
 
       if (!rows.length) {
@@ -484,21 +685,45 @@ router.post(
         validRowCount: rows.length,
       });
 
-      // Step 1: Group by student number + academic year.
+      // Step 1: Group by student number + school year + semester.
       const groupedMap = new Map();
       for (const row of rows) {
         const studentNumber = normalizeText(
           pickValue(row, ["Student Number", "StudentNumber", "student_number"]),
         );
-        const academicYear = normalizeText(
-          pickValue(row, ["Academic Year", "AcademicYear", "academic_year"]),
+        const schoolYear = normalizeText(
+          pickValue(row, ["School Year", "SchoolYear", "school_year", "SCHOOL YEAR"]),
+        );
+        const semesterCode = normalizeText(
+          pickValue(row, ["Semester", "semester", "SEMESTER"]),
         );
 
-        if (!studentNumber || !academicYear) continue;
+        const [semesterRows] = await db3.query(
+          "SELECT semester_id FROM semester_table WHERE semester_code = ? LIMIT 1",
+          [semesterCode],
+        );
 
-        const key = `${studentNumber}__${academicYear}`;
+        if (!semesterRows.length) {
+          return res.status(400).json({
+            success: false,
+            message: `Semester code '${semesterCode}' is not found in the existing records`,
+          });
+        }
+
+        const firstYear = schoolYear ? schoolYear.split("-")[0].trim() : null;
+        const semesterId = semesterRows[0].semester_id;
+
+        if (!studentNumber || !firstYear || !semesterId) continue;
+
+        const key = `${studentNumber}__${firstYear}__${semesterId}`;
         if (!groupedMap.has(key)) {
-          groupedMap.set(key, { studentNumber, academicYear, rows: [] });
+          groupedMap.set(key, {
+            studentNumber,
+            firstYear,
+            semesterId,
+            schoolYear,
+            rows: [],
+          });
         }
         groupedMap.get(key).rows.push(row);
       }
@@ -507,7 +732,7 @@ router.post(
         return res.status(400).json({
           success: false,
           error:
-            "No rows with both Student Number and Academic Year were found",
+            "No rows with Student Number, School Year, and Semester were found",
         });
       }
 
@@ -519,9 +744,10 @@ router.post(
       let createdPersons = 0;
       let processedStudents = 0;
       let insertedSubjects = 0;
-      let updatedSubjects = 0;
+      let insertedCourses = 0;
       const skippedItems = [];
       const seenRowSignatures = new Set();
+      const gradeConversions = await getGradeConversions();
 
       try {
         await connection.beginTransaction();
@@ -533,26 +759,24 @@ router.post(
             "Student Name",
             "StudentName",
             "student_name",
+            "(No column name)",
           ]);
-          const programDescription = pickValue(firstRow, [
+          const courseValue = normalizeText(pickValue(firstRow, [
+            "Course",
+            "course",
             "Program Description",
             "ProgramDescription",
             "program_description",
-          ]);
-          const yearLevelDescription = normalizeText(
+          ]));
+          const majorValue = normalizeText(pickValue(firstRow, ["Major", "major"]));
+          const yearLevelId = normalizeText(
             pickValue(firstRow, [
               "Year Level",
               "YearLevel",
-              "year_level_description",
+              "year_level",
             ]),
           );
 
-          const {
-            yearDescription: schoolYearDescription,
-            semesterDescription,
-          } = parseAcademicYear(group.academicYear);
-          const { programCode, yearDescription: curriculumYearDescription } =
-            parseProgramDescription(programDescription);
           const { firstName, middleName, lastName } =
             parseStudentName(studentName);
 
@@ -560,61 +784,96 @@ router.post(
             studentNumber,
             studentName,
             parsedName: { lastName, firstName, middleName },
-            programDescription,
-            parsedProgram: { programCode, curriculumYearDescription },
-            yearLevelDescription,
-            academicYearRaw: group.academicYear,
-            parsedAcademicYear: { schoolYearDescription, semesterDescription },
+            courseValue,
+            majorValue,
+            yearLevelId,
+            schoolYear: group.schoolYear,
+            firstYear: group.firstYear,
+            semesterId: group.semesterId,
             rowsInGroup: group.rows.length,
           });
 
-          if (
-            !studentNumber ||
-            !programCode ||
-            !curriculumYearDescription ||
-            !yearLevelDescription ||
-            !schoolYearDescription ||
-            !semesterDescription
-          ) {
+          const [yearRows] = await connection.query(
+            `SELECT year_id FROM year_table WHERE TRIM(year_description) = TRIM(?) LIMIT 1`,
+            [group.firstYear],
+          );
+
+          if (!yearRows.length) {
             skippedItems.push({
               studentNumber,
-              reason:
-                "Missing required student metadata (program/year level/school year/semester)",
+              reason: `Year not found: ${group.firstYear}`,
             });
             continue;
           }
 
-          // Step 5 + 6: Resolve curriculum from program code + curriculum year description.
+          const yearId = yearRows[0].year_id;
+
+          if (
+            !studentNumber ||
+            !courseValue ||
+            !yearLevelId ||
+            !yearId ||
+            !group.semesterId
+          ) {
+            skippedItems.push({
+              studentNumber,
+              reason:
+                "Missing required student metadata (course/year level/year/semester)",
+            });
+            continue;
+          }
+
+          // Resolve program from Course + Major.
+          const parts = courseValue.split("-");
+          const cleanCourseValue = parts[0]?.trim().toUpperCase();
+          const cleanCurrYearValue = parts[1]?.trim();
+          const cleanMajorValue = (majorValue ?? "").trim();
+
+          if (!cleanCourseValue || !cleanCurrYearValue) {
+            skippedItems.push({
+              studentNumber,
+              reason: `Invalid course/curriculum value: ${courseValue}`,
+            });
+            continue;
+          }
+
           const [programRows] = await connection.query(
-            `SELECT program_id FROM program_table WHERE UPPER(TRIM(program_code)) = UPPER(TRIM(?)) LIMIT 1`,
-            [programCode],
+            `SELECT program_id
+             FROM program_table
+             WHERE UPPER(TRIM(program_code)) = UPPER(TRIM(?))
+               AND UPPER(TRIM(COALESCE(major, ''))) = UPPER(TRIM(?))
+             LIMIT 1`,
+            [cleanCourseValue, cleanMajorValue],
           );
 
           if (!programRows.length) {
             console.log("[IMPORT][GROUP] Program not found", {
               studentNumber,
-              programCode,
+              cleanCourseValue,
+              cleanMajorValue,
             });
             skippedItems.push({
               studentNumber,
-              reason: `Program not found: ${programCode}`,
+              reason: `Program not found: ${cleanCourseValue} (Major: ${cleanMajorValue})`,
             });
             continue;
           }
 
+          const programId = programRows[0].program_id;
+
           const [currYearRows] = await connection.query(
             `SELECT year_id FROM year_table WHERE TRIM(year_description) = TRIM(?) LIMIT 1`,
-            [curriculumYearDescription],
+            [cleanCurrYearValue],
           );
 
           if (!currYearRows.length) {
             console.log("[IMPORT][GROUP] Curriculum year not found", {
               studentNumber,
-              curriculumYearDescription,
+              cleanCurrYearValue,
             });
             skippedItems.push({
               studentNumber,
-              reason: `Curriculum year not found: ${curriculumYearDescription}`,
+              reason: `Curriculum year not found: ${cleanCurrYearValue}`,
             });
             continue;
           }
@@ -624,17 +883,17 @@ router.post(
            FROM curriculum_table
            WHERE year_id = ? AND program_id = ?
            LIMIT 1`,
-            [currYearRows[0].year_id, programRows[0].program_id],
+            [currYearRows[0].year_id, programId],
           );
           if (!curriculumRows.length) {
             console.log("[IMPORT][GROUP] Curriculum not found", {
               studentNumber,
-              programCode,
-              curriculumYearDescription,
+              programId,
+              cleanCurrYearValue,
             });
             skippedItems.push({
               studentNumber,
-              reason: `Curriculum not found for program=${programCode} year=${curriculumYearDescription}`,
+              reason: `Curriculum not found for program_id=${programId}, year_id=${currYearRows[0].year_id}`,
             });
             continue;
           }
@@ -642,90 +901,27 @@ router.post(
           const curriculumId = curriculumRows[0].curriculum_id;
           console.log("[IMPORT][GROUP] Resolved curriculum", {
             studentNumber,
-            programId: programRows[0].program_id,
+            programId,
             curriculumYearId: currYearRows[0].year_id,
             curriculumId,
           });
-
-          // Step 7: Resolve year level id.
-          const [yearLevelRows] = await connection.query(
-            `SELECT year_level_id
-           FROM year_level_table
-           WHERE UPPER(TRIM(year_level_description)) = UPPER(TRIM(?))
-           LIMIT 1`,
-            [yearLevelDescription],
-          );
-          if (!yearLevelRows.length) {
-            console.log("[IMPORT][GROUP] Year level not found", {
-              studentNumber,
-              yearLevelDescription,
-            });
-            skippedItems.push({
-              studentNumber,
-              reason: `Year level not found: ${yearLevelDescription}`,
-            });
-            continue;
-          }
-
-          const yearLevelId = yearLevelRows[0].year_level_id;
-          console.log("[IMPORT][GROUP] Resolved year level", {
-            studentNumber,
-            yearLevelDescription,
-            yearLevelId,
-          });
-
-          // Step 8: Resolve active school year id using year + semester description.
-          const [schoolYearRows] = await connection.query(
-            `SELECT year_id FROM year_table WHERE TRIM(year_description) = TRIM(?) LIMIT 1`,
-            [schoolYearDescription],
-          );
-          if (!schoolYearRows.length) {
-            console.log("[IMPORT][GROUP] School year not found", {
-              studentNumber,
-              schoolYearDescription,
-            });
-            skippedItems.push({
-              studentNumber,
-              reason: `School year not found: ${schoolYearDescription}`,
-            });
-            continue;
-          }
-
-          const [semesterRows] = await connection.query(
-            `SELECT semester_id
-           FROM semester_table
-           WHERE UPPER(TRIM(semester_description)) = UPPER(TRIM(?))
-           LIMIT 1`,
-            [semesterDescription],
-          );
-          if (!semesterRows.length) {
-            console.log("[IMPORT][GROUP] Semester not found", {
-              studentNumber,
-              semesterDescription,
-            });
-            skippedItems.push({
-              studentNumber,
-              reason: `Semester not found: ${semesterDescription}`,
-            });
-            continue;
-          }
 
           const [activeSchoolYearRows] = await connection.query(
             `SELECT id
            FROM active_school_year_table
            WHERE year_id = ? AND semester_id = ?
            LIMIT 1`,
-            [schoolYearRows[0].year_id, semesterRows[0].semester_id],
+            [yearId, group.semesterId],
           );
           if (!activeSchoolYearRows.length) {
             console.log("[IMPORT][GROUP] Active school year not found", {
               studentNumber,
-              schoolYearDescription,
-              semesterDescription,
+              yearId,
+              semesterId: group.semesterId,
             });
             skippedItems.push({
               studentNumber,
-              reason: `Active school year not found for ${schoolYearDescription}, ${semesterDescription}`,
+              reason: `Active school year not found for year_id=${yearId}, semester_id=${group.semesterId}`,
             });
             continue;
           }
@@ -733,129 +929,95 @@ router.post(
           const activeSchoolYearId = activeSchoolYearRows[0].id;
           console.log("[IMPORT][GROUP] Resolved active school year", {
             studentNumber,
-            schoolYearId: schoolYearRows[0].year_id,
-            semesterId: semesterRows[0].semester_id,
+            schoolYearId: yearId,
+            semesterId: group.semesterId,
             activeSchoolYearId,
           });
 
-          // Step 10/11/12: Resolve section, course, remarks, and pre-check duplicates first.
+          // Process each subject row for this student.
           const rowsToInsert = [];
           for (const row of group.rows) {
-            const sectionDescription = normalizeText(
-              pickValue(row, ["Section", "section", "Section Description"]),
-            );
-            const courseCode = normalizeText(
+            const subjectID = normalizeText(
               pickValue(row, [
-                "Course ",
-                "Course",
-                "Course Code",
-                "course_code",
+                "SubjectID",
+                "Subject Id",
+                "subject_id",
+              ]),
+            );
+            const subjectDescription = normalizeText(
+              pickValue(row, [
+                "SubjectDescription",
+                "Subject Description",
+                "subject_description",
               ]),
             );
 
-            if (!sectionDescription || !courseCode) {
-              console.log("[IMPORT][ROW] Missing section/course", {
+            if (!subjectID) {
+              console.log("[IMPORT][ROW] Missing subject ID", {
                 studentNumber,
-                sectionDescription,
-                courseCode,
               });
               skippedItems.push({
                 studentNumber,
-                reason: "Missing section or course code in row",
+                reason: "Missing SubjectID in row",
               });
               continue;
             }
 
-            const [sectionRows] = await connection.query(
-              `SELECT id FROM section_table WHERE UPPER(TRIM(description)) = UPPER(TRIM(?)) LIMIT 1`,
-              [sectionDescription],
-            );
-            if (!sectionRows.length) {
-              console.log("[IMPORT][ROW] Section not found", {
-                studentNumber,
-                sectionDescription,
-              });
-              skippedItems.push({
-                studentNumber,
-                reason: `Section not found: ${sectionDescription}`,
-              });
-              continue;
-            }
+            const departmentSectionId = 0;
 
-            const [departmentSectionRows] = await connection.query(
-              `SELECT id
-             FROM dprtmnt_section_table
-             WHERE section_id = ? AND curriculum_id = ?
-             LIMIT 1`,
-              [sectionRows[0].id, curriculumId],
-            );
-            if (!departmentSectionRows.length) {
-              console.log(
-                "[IMPORT][ROW] Department section mapping not found",
-                {
-                  studentNumber,
-                  sectionId: sectionRows[0].id,
-                  curriculumId,
-                },
-              );
-              skippedItems.push({
-                studentNumber,
-                reason: `Department section mapping not found for section=${sectionDescription} curriculum=${curriculumId}`,
-              });
-              continue;
-            }
-
-            const [courseRows] = await connection.query(
+            let [courseRows] = await connection.query(
               `SELECT course_id FROM course_table WHERE UPPER(TRIM(course_code)) = UPPER(TRIM(?)) LIMIT 1`,
-              [courseCode],
+              [subjectID],
             );
-            if (!courseRows.length) {
-              console.log("[IMPORT][ROW] Course not found", {
-                studentNumber,
-                courseRows,
-              });
-              skippedItems.push({
-                studentNumber,
-                reason: `Course not found: ${courseRows}`,
-              });
-              continue;
+
+            let courseId;
+            if (courseRows.length) {
+              courseId = courseRows[0].course_id;
+            } else {
+              const [insertResult] = await connection.query(
+                `INSERT INTO course_table
+                 (course_code, course_description, course_unit, lec_unit, lab_unit, prereq, corequisite, office_duty, is_included, include_summa, include_magna, include_cum)
+                 VALUES (?, ?, 0, 0, 0, NULL, NULL, 0, 1, 0, 0, 0)`,
+                [subjectID, subjectDescription || subjectID],
+              );
+              courseId = insertResult.insertId;
+              insertedCourses += 1;
             }
 
-            const midterm = toNullableNumber(
-              pickValue(row, ["Midterm", "midterm"]),
-            );
-            const finals = toNullableNumber(
-              pickValue(row, ["Finals", "finals"]),
-            );
-            const finalGrade = toNullableNumber(
-              pickValue(row, ["Final Grade", "FinalGrade", "final_grade"]),
-            );
-            const enRemarks = mapRemarkToNumeric(
-              pickValue(row, ["Remarks", "Remark", "remarks", "remark"]),
-            );
+            const gradeOutcome = deriveBulkEnrolledSubjectOutcome({
+              midtermRaw: pickValue(row, ["Midterm", "midterm", "MidtermGrade"]),
+              finalsRaw: pickValue(row, ["Finals", "finals", "FinalGrade"]),
+              finalGradeRaw: pickValue(row, [
+                "Final Grade",
+                "FinalGrade",
+                "final_grade",
+                "AverageGrade",
+              ]),
+              remarkRaw: pickValue(row, ["Remarks", "Remark", "remarks", "remark"]),
+              gradeConversions,
+            });
 
             console.log("[IMPORT][ROW] Extracted row payload", {
               studentNumber,
-              courseCode,
-              courseId: courseRows[0].course_id,
-              sectionDescription,
-              sectionId: sectionRows[0].id,
-              departmentSectionId: departmentSectionRows[0].id,
+              subjectID,
+              courseId,
+              departmentSectionId,
               curriculumId,
               yearLevelId,
               activeSchoolYearId,
-              midterm,
-              finals,
-              finalGrade,
-              enRemarks,
+              midterm: gradeOutcome.midterm,
+              finals: gradeOutcome.finals,
+              finalGrade: gradeOutcome.finalGrade,
+              enRemarks: gradeOutcome.enRemarks,
+              gradesStatus: gradeOutcome.gradesStatus,
+              status: gradeOutcome.status,
             });
 
             const rowSignature = [
               studentNumber,
               curriculumId,
-              courseRows[0].course_id,
+              courseId,
               yearLevelId,
-              departmentSectionRows[0].id,
               activeSchoolYearId,
               normalizeText(lastName).toUpperCase(),
               normalizeText(firstName).toUpperCase(),
@@ -884,11 +1046,10 @@ router.post(
              INNER JOIN student_status_table sst ON sst.student_number = es.student_number
              INNER JOIN student_numbering_table snt ON snt.student_number = es.student_number
              INNER JOIN person_table pt ON pt.person_id = snt.person_id
-             WHERE es.student_number = ?
+               WHERE es.student_number = ?
                AND es.curriculum_id = ?
                AND es.course_id = ?
                AND es.active_school_year_id = ?
-               AND es.department_section_id = ?
                AND sst.year_level_id = ?
                AND UPPER(TRIM(pt.last_name)) = UPPER(TRIM(?))
                AND UPPER(TRIM(pt.first_name)) = UPPER(TRIM(?))
@@ -897,9 +1058,8 @@ router.post(
               [
                 studentNumber,
                 curriculumId,
-                courseRows[0].course_id,
+                courseId,
                 activeSchoolYearId,
-                departmentSectionRows[0].id,
                 yearLevelId,
                 lastName,
                 firstName,
@@ -923,13 +1083,17 @@ router.post(
             rowsToInsert.push({
               studentNumber,
               curriculumId,
-              courseId: courseRows[0].course_id,
+              courseId,
               activeSchoolYearId,
-              midterm,
-              finals,
-              finalGrade,
-              enRemarks,
-              departmentSectionId: departmentSectionRows[0].id,
+              midterm: gradeOutcome.midterm,
+              finals: gradeOutcome.finals,
+              finalGrade: gradeOutcome.finalGrade,
+              enRemarks: gradeOutcome.enRemarks,
+              status: gradeOutcome.status,
+              feStatus: 0,
+              gradesStatus: gradeOutcome.gradesStatus,
+              remarks: gradeOutcome.remarks,
+              departmentSectionId,
             });
             seenRowSignatures.add(rowSignature);
           }
@@ -1024,8 +1188,8 @@ router.post(
           for (const payload of rowsToInsert) {
             await connection.query(
               `INSERT INTO enrolled_subject
-              (student_number, curriculum_id, course_id, active_school_year_id, midterm, finals, final_grade, en_remarks, department_section_id, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              (student_number, curriculum_id, course_id, active_school_year_id, midterm, finals, final_grade, en_remarks, grades_status, department_section_id, status, fe_status, remarks)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 payload.studentNumber,
                 payload.curriculumId,
@@ -1035,7 +1199,11 @@ router.post(
                 payload.finals,
                 payload.finalGrade,
                 payload.enRemarks,
+                payload.gradesStatus,
                 payload.departmentSectionId,
+                payload.status,
+                payload.feStatus,
+                payload.remarks,
               ],
             );
 
@@ -1065,7 +1233,7 @@ router.post(
           processedStudents,
           createdPersons,
           insertedSubjects,
-          updatedSubjects,
+          insertedCourses,
           skippedCount: skippedItems.length,
         });
       } catch (transactionErr) {
@@ -1085,8 +1253,9 @@ router.post(
         groupedRecords: groupedMap.size,
         processedStudents,
         createdPersons,
+        insertedCount: insertedSubjects,
         insertedSubjects,
-        updatedSubjects,
+        insertedCourses,
         skippedCount: skippedItems.length,
         skippedItems: skippedItems.slice(0, 50),
         warnings: req.xlsxWarnings || {},
@@ -2032,7 +2201,7 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
     }
 
     function normalizeGender(val) {
-      if (!val) return null;
+      if (isBlankLikeValue(val)) return "";
 
       const v = val.toString().trim().toLowerCase();
 
@@ -2061,7 +2230,7 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
     }
 
     function normalizeSchoolLevel(value) {
-      if (!value) return null;
+      if (isBlankLikeValue(value)) return "";
 
       const v = value.toString().trim().toUpperCase();
 
@@ -2089,6 +2258,231 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
       return val;
     }
 
+    function normalizeHeader(value) {
+      return value
+        ?.toString()
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function normalizeBlankLikeValue(value) {
+      return value
+        ?.toString()
+        .trim()
+        .toLowerCase()
+        .replace(/\./g, "")
+        .replace(/\s+/g, "");
+    }
+
+    function isBlankLikeValue(value) {
+      const normalized = normalizeBlankLikeValue(value);
+      return [
+        undefined,
+        null,
+        "",
+        "-",
+        "~",
+        "n/a",
+        "na",
+        "null",
+        "0",
+        "deceased",
+      ].includes(normalized);
+    }
+
+    function hasDeceasedMarker(value) {
+      return /\bdeceased\b/i.test(value?.toString() || "");
+    }
+
+    function cleanFullNameValue(value) {
+      if (value === null || value === undefined) return "";
+
+      const withoutDeceased = value
+        .toString()
+        .replace(/\(\s*deceased\s*\)/gi, " ")
+        .replace(/\[\s*deceased\s*\]/gi, " ")
+        .replace(/\bdeceased\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return isBlankLikeValue(withoutDeceased) ? "" : withoutDeceased;
+    }
+
+    function isLikelyEmail(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        value?.toString().trim() || "",
+      );
+    }
+
+    function buildHeaderIndex(headerRow) {
+      const index = {};
+      headerRow.forEach((header, idx) => {
+        const key = normalizeHeader(header);
+        if (key && index[key] === undefined) index[key] = idx;
+      });
+      return index;
+    }
+
+    function findHeaderRowIndex(rows) {
+      return rows.findIndex((row) =>
+        row.some((cell) =>
+          ["studentnumber", "studentno", "studentid"].includes(
+            normalizeHeader(cell),
+          ),
+        ),
+      );
+    }
+
+    function getHeaderIndex(headerIndex, aliases) {
+      for (const alias of aliases) {
+        const idx = headerIndex[normalizeHeader(alias)];
+        if (idx !== undefined) return idx;
+      }
+      return undefined;
+    }
+
+    function getCell(row, headerIndex, aliases) {
+      const idx = getHeaderIndex(headerIndex, aliases);
+      return idx === undefined ? null : row[idx];
+    }
+
+    function hasHeader(headerIndex, aliases) {
+      return getHeaderIndex(headerIndex, aliases) !== undefined;
+    }
+
+    function normalizeNameExtension(value) {
+      const text = value
+        ?.toString()
+        .trim()
+        .replace(/\./g, "")
+        .toUpperCase();
+
+      if (!text) return null;
+
+      const extensionMap = {
+        JR: "Jr.",
+        JUNIOR: "Jr.",
+        SR: "Sr.",
+        SENIOR: "Sr.",
+        I: "I",
+        II: "II",
+        III: "III",
+        IV: "IV",
+        V: "V",
+        VI: "VI",
+        VII: "VII",
+        VIII: "VIII",
+        IX: "IX",
+        X: "X",
+      };
+
+      return extensionMap[text] || null;
+    }
+
+    function extractNameExtension(parts) {
+      const nameParts = [...parts];
+      let extension = null;
+
+      while (nameParts.length) {
+        const possibleExtension = normalizeNameExtension(
+          nameParts[nameParts.length - 1],
+        );
+        if (!possibleExtension) break;
+
+        extension = possibleExtension;
+        nameParts.pop();
+      }
+
+      return { nameParts, extension };
+    }
+
+    function findSurnameStart(parts) {
+      if (parts.length <= 1) return 0;
+
+      const lowerParts = parts.map((part) =>
+        part
+          .toString()
+          .trim()
+          .toLowerCase()
+          .replace(/\./g, ""),
+      );
+
+      const surnameParticles = new Set([
+        "da",
+        "das",
+        "de",
+        "del",
+        "dela",
+        "dellas",
+        "delos",
+        "di",
+        "dos",
+        "du",
+        "la",
+        "las",
+        "los",
+        "san",
+        "santa",
+        "santo",
+        "st",
+        "sta",
+        "van",
+        "von",
+      ]);
+
+      for (let i = 1; i < lowerParts.length - 1; i++) {
+        if (surnameParticles.has(lowerParts[i])) return i;
+      }
+
+      return parts.length - 1;
+    }
+
+    function splitFullName(fullName) {
+      if (!fullName || typeof fullName !== "string") {
+        return { family: "", given: "", middle: "", ext: "" };
+      }
+
+      const clean = fullName.trim();
+      if (isBlankLikeValue(clean)) {
+        return { family: "", given: "", middle: "", ext: "" };
+      }
+
+      if (clean.includes(",")) {
+        const [last, rest = ""] = clean.split(",");
+        const lastParts = last.trim().split(/\s+/).filter(Boolean);
+        const restParts = rest.trim().split(/\s+/).filter(Boolean);
+        const { nameParts: familyParts, extension: familyExtension } =
+          extractNameExtension(lastParts);
+        const { nameParts: givenParts, extension: givenExtension } =
+          extractNameExtension(restParts);
+
+        return {
+          family: familyParts.join(" ") || null,
+          given: givenParts[0] || null,
+          middle: givenParts.slice(1).join(" ") || null,
+          ext: familyExtension || givenExtension,
+        };
+      }
+
+      const parts = clean.split(/\s+/).filter(Boolean);
+      const { nameParts, extension } = extractNameExtension(parts);
+      const surnameStart = findSurnameStart(nameParts);
+
+      return {
+        family: nameParts.slice(surnameStart).join(" ") || null,
+        given: nameParts[0] || null,
+        middle: nameParts.slice(1, surnameStart).join(" ") || null,
+        ext: extension,
+      };
+    }
+
+    function cleanValue(v) {
+      if (isBlankLikeValue(v)) return "";
+
+      return v;
+    }
+
     // ---------------------------------------
     // READ EXCEL
     // ---------------------------------------
@@ -2099,6 +2493,15 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
       header: 1,
       defval: null,
     });
+
+    const headerRowIndex = findHeaderRowIndex(rows);
+    if (headerRowIndex === -1) {
+      return res.status(400).json({
+        error: "StudentNumber header was not found in the uploaded file",
+      });
+    }
+
+    const headerIndex = buildHeaderIndex(rows[headerRowIndex]);
 
     // ---------------------------------------
     // COUNTERS
@@ -2267,14 +2670,91 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
       "created_at",
     ];
 
+    const headerAliases = {
+      student_number: ["StudentNumber", "Student Number", "student_number"],
+      last_name: ["Last Name", "LastName", "last_name"],
+      first_name: ["First Name", "FirstName", "first_name"],
+      middle_name: ["Middle Name", "MiddleName", "middle_name"],
+      extension: ["Extension", "Ext", "Name Extension"],
+      lrnNumber: ["LRN Number", "LRN", "lrnNumber"],
+      birthOfDate: ["Birth Of Date", "Birth Date", "Date of Birth", "Birthday"],
+      birthPlace: ["Birth Place", "Place of Birth"],
+      gender: ["Gender", "Sex"],
+      height: ["Height"],
+      weight: ["Weight"],
+      civilStatus: ["Civil Status", "CivilStatus"],
+      citizenship: ["Citizenship", "Nationality"],
+      religion: ["Religion"],
+      presentStreet: ["Present Address", "Present Street", "presentStreet"],
+      presentZipCode: ["Present Zip Code", "Present ZipCode", "presentZipCode"],
+      permanentStreet: [
+        "Permanent Address",
+        "Permanent Street",
+        "permanentStreet",
+      ],
+      permanentZipCode: [
+        "Permanent Zip Code",
+        "Permanent ZipCode",
+        "permanentZipCode",
+      ],
+      cellphoneNumber: ["Cellphone Number", "Contact Number", "Mobile Number"],
+      emailAddress: [
+        "Email Address",
+        "Student Email Address",
+        "Student Email",
+        "emailAddress",
+      ],
+      pwdType: ["Pwd Type", "PWD Type"],
+      pwdId: ["PWD ID Number", "PWD ID", "Pwd Id"],
+      tribeEthnicGroup: ["Tribe / Ethnic Group", "Tribe Ethnic Group"],
+      schoolLevel: ["School Level"],
+      schoolLevel1: ["School Level"],
+      schoolLastAttended: ["School Last Attended"],
+      schoolLastAttended1: ["School Last Attended"],
+      schoolAddress: ["School Address"],
+      schoolAddress1: ["School Address"],
+      courseProgram: ["Course Program", "Course/Program"],
+      courseProgram1: ["Course Program", "Course/Program"],
+      honor: ["Honor", "Honors"],
+      honor1: ["Honor", "Honors"],
+      generalAverage: ["General Average", "Average"],
+      generalAverage1: ["General Average", "Average"],
+      yearGraduated: ["Year Graduated"],
+      yearGraduated1: ["Year Graduated"],
+      father_fullname: ["Father Full Name", "Father Name"],
+      father_ext: ["Father Extension", "Father Ext", "Father Name Extension"],
+      father_contact: ["Father Contact", "Father Contact Number"],
+      father_occupation: ["Father Occupation"],
+      father_income: ["Father Income"],
+      mother_fullname: ["Mother Full Name", "Mother Name"],
+      mother_ext: ["Mother Extension", "Mother Ext", "Mother Name Extension"],
+      mother_contact: ["Mother Contact", "Mother Contact Number"],
+      mother_occupation: ["Mother Occupation"],
+      mother_income: ["Mother Income"],
+      annual_income: ["Family Annual Income", "Annual Income"],
+      guardian_fullname: [
+        "Guardian Full Name",
+        "Gurdian Full Name",
+        "Guardian Name",
+      ],
+      guardian_ext: [
+        "Guardian Extension",
+        "Guardian Ext",
+        "Guardian Name Extension",
+      ],
+      guardian_contact: ["Guardian Contact", "Guardian Contact Number"],
+    };
+
     // ---------------------------------------
     // PROGRAM + CAMPUS MAP (NO VALIDATION)
     // ---------------------------------------
 
     const studentNumbers = rows
-      .slice(1)
+      .slice(headerRowIndex + 1)
       .map((r) => {
-        const raw = r[0]?.toString().trim();
+        const raw = getCell(r, headerIndex, headerAliases.student_number)
+          ?.toString()
+          .trim();
         if (!raw) return null;
 
         return normalizeStudentNumber(raw); // no validation
@@ -2319,13 +2799,19 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
     // PROCESS ROWS
     // ---------------------------------------
 
-    for (let i = 1; i < rows.length; i++) {
+    for (let i = headerRowIndex + 1; i < rows.length; i++) {
       const row = rows[i];
       if (!Object.values(row).some((v) => v)) continue;
 
       totalRows++;
 
-      const rawStudentNumber = row[0]?.toString().trim();
+      const rawStudentNumber = getCell(
+        row,
+        headerIndex,
+        headerAliases.student_number,
+      )
+        ?.toString()
+        .trim();
       const normalizedStudentNumber = normalizeStudentNumber(rawStudentNumber);
       // ❗ SKIP header / non-student rows
       if (
@@ -2385,9 +2871,14 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
         // ❌ ONLY missing students go here
         missingStudents.push({
           studentNumber: rawStudentNumber, // ✅ KEEP ORIGINAL (19-*****)
-          last_name: cleanValue(row[1]) || "",
-          first_name: cleanValue(row[2]) || "",
-          middle_name: cleanValue(row[3]) || "",
+          last_name:
+            cleanValue(getCell(row, headerIndex, headerAliases.last_name)) || "",
+          first_name:
+            cleanValue(getCell(row, headerIndex, headerAliases.first_name)) ||
+            "",
+          middle_name:
+            cleanValue(getCell(row, headerIndex, headerAliases.middle_name)) ||
+            "",
         });
 
         continue;
@@ -2435,43 +2926,6 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
       // ---------------------------------------
       // (REST OF YOUR CODE UNCHANGED)
       // ---------------------------------------
-
-      function splitFullName(fullName) {
-        if (!fullName || typeof fullName !== "string") {
-          return { family: null, given: null, middle: null };
-        }
-
-        const clean = fullName.trim();
-
-        if (clean.includes(",")) {
-          const [last, rest] = clean.split(",");
-          const parts = rest.trim().split(/\s+/);
-
-          return {
-            family: last.trim(),
-            given: parts[0] || null,
-            middle: parts.slice(1).join(" ") || null,
-          };
-        }
-
-        const parts = clean.split(/\s+/);
-
-        return {
-          family: parts.length > 1 ? parts[parts.length - 1] : null,
-          given: parts[0] || null,
-          middle: parts.slice(1, -1).join(" ") || null,
-        };
-      }
-
-      function cleanValue(v) {
-        if (!v) return null;
-
-        const val = v.toString().trim().toLowerCase();
-
-        if (["-", "n/a", "na", "~", ""].includes(val)) return null;
-
-        return v;
-      }
 
       let birthTmp = null;
 
@@ -2533,26 +2987,69 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
         69: "weight",
       };
 
-      const fatherParsed = splitFullName(row[38]);
-      const motherParsed = splitFullName(row[47]);
-      const guardianParsed = splitFullName(row[62]);
+      const fatherFullNameRaw = getCell(
+        row,
+        headerIndex,
+        headerAliases.father_fullname,
+      );
+      const motherFullNameRaw = getCell(
+        row,
+        headerIndex,
+        headerAliases.mother_fullname,
+      );
+      const guardianFullNameRaw = getCell(
+        row,
+        headerIndex,
+        headerAliases.guardian_fullname,
+      );
+
+      const fatherParsed = splitFullName(cleanFullNameValue(fatherFullNameRaw));
+      const motherParsed = splitFullName(cleanFullNameValue(motherFullNameRaw));
+      const guardianParsed = splitFullName(
+        cleanFullNameValue(guardianFullNameRaw),
+      );
 
       const personValues = columns.map((col) => {
+        if (col === "father_deceased") {
+          return hasDeceasedMarker(fatherFullNameRaw) ? 1 : "";
+        }
         if (col === "father_family_name") return fatherParsed.family;
         if (col === "father_given_name") return fatherParsed.given;
         if (col === "father_middle_name") return fatherParsed.middle;
+        if (col === "father_ext") {
+          return (
+            fatherParsed.ext ||
+            normalizeNameExtension(
+              getCell(row, headerIndex, headerAliases.father_ext),
+            )
+          );
+        }
 
+        if (col === "mother_deceased") {
+          return hasDeceasedMarker(motherFullNameRaw) ? 1 : "";
+        }
         if (col === "mother_family_name") return motherParsed.family;
         if (col === "mother_given_name") return motherParsed.given;
         if (col === "mother_middle_name") return motherParsed.middle;
+        if (col === "mother_ext") {
+          return (
+            motherParsed.ext ||
+            normalizeNameExtension(
+              getCell(row, headerIndex, headerAliases.mother_ext),
+            )
+          );
+        }
 
         if (col === "guardian_family_name") return guardianParsed.family;
         if (col === "guardian_given_name") return guardianParsed.given;
         if (col === "guardian_middle_name") return guardianParsed.middle;
-
-        const dbToExcelMap = {};
-        for (const [key, value] of Object.entries(excelToDbMap)) {
-          dbToExcelMap[value] = Number(key);
+        if (col === "guardian_ext") {
+          return (
+            guardianParsed.ext ||
+            normalizeNameExtension(
+              getCell(row, headerIndex, headerAliases.guardian_ext),
+            )
+          );
         }
 
         if (col === "student_number") return rawStudentNumber;
@@ -2562,16 +3059,18 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
         if (col === "yearLevel") return resolvedYearLevelId;
         if (col === "created_at") return new Date();
 
-        const excelIndex = dbToExcelMap[col];
-        if (excelIndex === undefined) return null;
+        const aliases = headerAliases[col];
+        if (!aliases) return null;
 
-        let v = cleanValue(row[excelIndex]);
+        let v = cleanValue(getCell(row, headerIndex, aliases));
 
         if (col === "schoolLevel" || col === "schoolLevel1") {
           v = normalizeSchoolLevel(v);
         }
 
-        if (col === "gender") v = normalizeGender(v);
+        if (col === "emailAddress" && !isLikelyEmail(v)) return "";
+
+        if (col === "gender" || col === "Gender") v = normalizeGender(v);
 
         if (col === "birthOfDate") {
           v = excelDateToJSDate(v);
@@ -2605,7 +3104,50 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
         personValueMap[col] = personValues[idx];
       });
 
+      const uploadedFields = new Set(
+        Object.entries(headerAliases)
+          .filter(([, aliases]) => hasHeader(headerIndex, aliases))
+          .map(([field]) => field),
+      );
+
+      if (uploadedFields.has("birthOfDate")) uploadedFields.add("age");
+      if (uploadedFields.has("father_fullname")) {
+        uploadedFields.add("father_deceased");
+        uploadedFields.add("father_family_name");
+        uploadedFields.add("father_given_name");
+        uploadedFields.add("father_middle_name");
+        uploadedFields.add("father_ext");
+      }
+      if (uploadedFields.has("mother_fullname")) {
+        uploadedFields.add("mother_deceased");
+        uploadedFields.add("mother_family_name");
+        uploadedFields.add("mother_given_name");
+        uploadedFields.add("mother_middle_name");
+        uploadedFields.add("mother_ext");
+      }
+      if (uploadedFields.has("guardian_fullname")) {
+        uploadedFields.add("guardian_family_name");
+        uploadedFields.add("guardian_given_name");
+        uploadedFields.add("guardian_middle_name");
+        uploadedFields.add("guardian_ext");
+      }
+
+      const alwaysUpdateFields = new Set([
+        "student_number",
+        "campus",
+        "program",
+        "academicProgram",
+        "yearLevel",
+        "created_at",
+      ]);
+
       const columnsToUpdate = columns.filter((col) => {
+        if (!alwaysUpdateFields.has(col) && !uploadedFields.has(col)) {
+          return false;
+        }
+        if (col === "emailAddress" && !isLikelyEmail(personValueMap[col])) {
+          return false;
+        }
         if (col === "campus" && resolvedCampus == null) return false;
         if (col === "program" && resolvedProgram == null) return false;
         if (col === "academicProgram" && resolvedAcademicProgram == null)
@@ -2631,8 +3173,11 @@ router.post("/api/person/import", upload.single("file"), async (req, res) => {
     if (missingStudents.length > 0) {
       console.log("\n========= MISSING STUDENTS =========");
       console.table(
-        missingStudents.map((sn) => ({
-          studentNumber: sn,
+        missingStudents.map((student) => ({
+          studentNumber: student.studentNumber,
+          last_name: student.last_name,
+          first_name: student.first_name,
+          middle_name: student.middle_name,
         })),
       );
       console.log("====================================\n");

@@ -43,6 +43,9 @@ const Archived = lazy(() => import("./account_management/ArchivedModule"));
 const MigrationDataPanel = lazy(
   () => import("./account_management/MigrationDataPanel"),
 );
+const UploadEnrolledSubject = lazy(
+  () => import("./account_management/UploadEnrolledSubject"),
+);
 const PageCRUD = lazy(() => import("./account_management/PageCRUD"));
 const RegisterProf = lazy(() => import("./account_management/RegisterProf"));
 const RegisterRegistrar = lazy(() => import("./account_management/RegisterRegistrar"));
@@ -679,26 +682,30 @@ function App() {
                             src={`${API_BASE_URL}${settings.logo_url}?t=${Date.now()}`}
                             alt="Logo"
                             style={{
-                              height: "55px",
-                              width: "55px",
+                              height: "50px",
+                              width: "50px",
                               borderRadius: "50%",
                               objectFit: "cover",
-                              marginRight: "12px",
+                              marginRight: "3px",
+                              marginLeft: "-5px",
                               cursor: "pointer",
+
                               border: "2px solid white",
                             }}
                             onClick={() => window.location.reload()}
                           />
                         )}
-
-                        <Typography variant="h5" sx={{ fontWeight: "bold" }}>
-                          <span style={{ fontFamily: "Poppins, sans-serif", fontSize: "28px" }}>
-                            {settings?.short_term || "SCHOOL NAME"} -
-                          </span>{" "}
-                          <span style={{ fontFamily: "Poppins, sans-serif", fontSize: "24px" }}>
-                            {settings?.company_name || "SCHOOL NAME"}
-                          </span>
-                        </Typography>
+                        <Box sx={{display: "flex", flexDirection: "column", scale: "0.9"}}>
+                          <Typography sx={{ fontWeight: "bold", mt: "0px"}}>
+                            <span style={{ fontFamily: "Poppins, sans-serif", fontSize: "24px" }}>
+                              {settings?.company_name || "SCHOOL NAME"}
+                            </span>
+                          </Typography>
+                          <Typography  sx={{ fontWeight: "400", fontSize: "12px" ,mt: "-3px", letterSpacing: "2.5px"}}>
+                            {settings?.short_term || "SCHOOL NAME"} ACADEMIC INFORMATION SYSTEM
+                          </Typography>
+                        </Box>
+                          
                       </Box>
 
                       {/* RIGHT SIDE (TIME + DATE) */}
@@ -1921,6 +1928,14 @@ function App() {
                         element={
                           <ProtectedRoute>
                             <MigrationDataPanel />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/upload_enrolled_subject"
+                        element={
+                          <ProtectedRoute>
+                            <UploadEnrolledSubject />
                           </ProtectedRoute>
                         }
                       />

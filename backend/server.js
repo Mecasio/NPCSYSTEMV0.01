@@ -2589,7 +2589,7 @@ const buildAuditEventMessage = async (req) => {
     },
     enrolled_subjects_imported: {
       type: "import",
-      message: `${employeePrefix} successfully imported enrolled subjects from XLSX${details.imported_count ? ` (${details.imported_count} record/s)` : ""}${details.skipped_count ? ` with ${details.skipped_count} skipped row/s` : ""}`,
+      message: `${employeePrefix} successfully imported enrolled subjects from XLSX${details.file_name ? ` (${details.file_name})` : ""}${details.imported_count ? ` (${details.imported_count} record/s)` : ""}${details.skipped_count ? ` with ${details.skipped_count} skipped row/s` : ""}${details.campus ? ` for campus ${details.campus}` : ""}`,
     },
     payment_saved: {
       type: "insert",
