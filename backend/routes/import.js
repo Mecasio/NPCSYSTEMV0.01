@@ -118,7 +118,7 @@ const parseProgramDescription = (programDescription) => {
     return { programCode: "", yearDescription: "" };
   }
 
-  const match = text.match(/^(.*)-(\d{4})$/);
+  const match = text.match(/^(.*)[\s_-]+(\d{4})$/);
   if (match) {
     return {
       programCode: normalizeText(match[1]),
@@ -128,6 +128,11 @@ const parseProgramDescription = (programDescription) => {
 
   return { programCode: text, yearDescription: "" };
 };
+
+const normalizeProgramCodeForMatching = (programCode) =>
+  normalizeText(programCode)
+    .toUpperCase()
+    .replace(/[\s_-]+/g, "");
 
 const parseAcademicYear = (academicYearText) => {
   const text = normalizeText(academicYearText);
@@ -747,6 +752,7 @@ router.post(
       let insertedCourses = 0;
       const createdPersonIds = [];
       const skippedItems = [];
+      const missingCurriculums = [];
       const seenRowSignatures = new Set();
       const gradeConversions = await getGradeConversions();
 
@@ -802,6 +808,8 @@ router.post(
           if (!yearRows.length) {
             skippedItems.push({
               studentNumber,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason: `Year not found: ${group.firstYear}`,
             });
             continue;
@@ -818,21 +826,29 @@ router.post(
           ) {
             skippedItems.push({
               studentNumber,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason:
                 "Missing required student metadata (course/year level/year/semester)",
             });
             continue;
           }
 
-          // Resolve program from Course + Major.
-          const parts = courseValue.split("-");
-          const cleanCourseValue = parts[0]?.trim().toUpperCase();
-          const cleanCurrYearValue = parts[1]?.trim();
+          // Resolve program from Course + Major. Parse the last separator before
+          // the 4-digit curriculum year so codes like OFF-AD-2018 stay OFF-AD.
+          const { programCode, yearDescription } =
+            parseProgramDescription(courseValue);
+          const cleanCourseValue = programCode.toUpperCase();
+          const cleanCurrYearValue = yearDescription;
           const cleanMajorValue = (majorValue ?? "").trim();
+          const normalizedProgramCode =
+            normalizeProgramCodeForMatching(cleanCourseValue);
 
           if (!cleanCourseValue || !cleanCurrYearValue) {
             skippedItems.push({
               studentNumber,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason: `Invalid course/curriculum value: ${courseValue}`,
             });
             continue;
@@ -841,10 +857,10 @@ router.post(
           const [programRows] = await connection.query(
             `SELECT program_id
              FROM program_table
-             WHERE UPPER(TRIM(program_code)) = UPPER(TRIM(?))
+             WHERE REPLACE(REPLACE(REPLACE(UPPER(TRIM(program_code)), '-', ''), '_', ''), ' ', '') = ?
                AND UPPER(TRIM(COALESCE(major, ''))) = UPPER(TRIM(?))
              LIMIT 1`,
-            [cleanCourseValue, cleanMajorValue],
+            [normalizedProgramCode, cleanMajorValue],
           );
 
           if (!programRows.length) {
@@ -855,6 +871,8 @@ router.post(
             });
             skippedItems.push({
               studentNumber,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason: `Program not found: ${cleanCourseValue} (Major: ${cleanMajorValue})`,
             });
             continue;
@@ -874,6 +892,8 @@ router.post(
             });
             skippedItems.push({
               studentNumber,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason: `Curriculum year not found: ${cleanCurrYearValue}`,
             });
             continue;
@@ -890,11 +910,25 @@ router.post(
             console.log("[IMPORT][GROUP] Curriculum not found", {
               studentNumber,
               programId,
+              cleanCourseValue,
+              cleanMajorValue,
               cleanCurrYearValue,
+            });
+            missingCurriculums.push({
+              studentNumber,
+              programId,
+              programCode: cleanCourseValue,
+              major: cleanMajorValue,
+              curriculumYear: cleanCurrYearValue,
+              yearLevelId,
+              schoolYear: group.schoolYear,
+              yearId: currYearRows[0].year_id,
             });
             skippedItems.push({
               studentNumber,
-              reason: `Curriculum not found for program_id=${programId}, year_id=${currYearRows[0].year_id}`,
+              yearLevelId,
+              schoolYear: group.schoolYear,
+              reason: `Missing curriculum: ${cleanCourseValue}${cleanMajorValue ? ` (${cleanMajorValue})` : ""} - ${cleanCurrYearValue}`,
             });
             continue;
           }
@@ -922,6 +956,9 @@ router.post(
             });
             skippedItems.push({
               studentNumber,
+              curriculumId,
+              yearLevelId,
+              schoolYear: group.schoolYear,
               reason: `Active school year not found for year_id=${yearId}, semester_id=${group.semesterId}`,
             });
             continue;
@@ -959,6 +996,10 @@ router.post(
               });
               skippedItems.push({
                 studentNumber,
+                curriculumId,
+                yearLevelId,
+                activeSchoolYearId,
+                schoolYear: group.schoolYear,
                 reason: "Missing SubjectID in row",
               });
               continue;
@@ -989,10 +1030,11 @@ router.post(
               midtermRaw: pickValue(row, ["Midterm", "midterm", "MidtermGrade"]),
               finalsRaw: pickValue(row, ["Finals", "finals", "FinalGrade"]),
               finalGradeRaw: pickValue(row, [
+                "AverageGrade",
+                "Average Grade",
                 "Final Grade",
                 "FinalGrade",
                 "final_grade",
-                "AverageGrade",
               ]),
               remarkRaw: pickValue(row, ["Remarks", "Remark", "remarks", "remark"]),
               gradeConversions,
@@ -1018,11 +1060,7 @@ router.post(
               studentNumber,
               curriculumId,
               courseId,
-              yearLevelId,
               activeSchoolYearId,
-              normalizeText(lastName).toUpperCase(),
-              normalizeText(firstName).toUpperCase(),
-              normalizeText(middleName).toUpperCase(),
             ].join("|");
 
             // Prevent duplicate rows within the same uploaded file.
@@ -1036,6 +1074,12 @@ router.post(
               );
               skippedItems.push({
                 studentNumber,
+                curriculumId,
+                courseId,
+                courseCode: subjectID,
+                yearLevelId,
+                activeSchoolYearId,
+                schoolYear: group.schoolYear,
                 reason: `${studentNumber}'s Data Already exist`,
               });
               continue;
@@ -1044,27 +1088,16 @@ router.post(
             const [existingExactData] = await connection.query(
               `SELECT es.id
              FROM enrolled_subject es
-             INNER JOIN student_status_table sst ON sst.student_number = es.student_number
-             INNER JOIN student_numbering_table snt ON snt.student_number = es.student_number
-             INNER JOIN person_table pt ON pt.person_id = snt.person_id
                WHERE es.student_number = ?
                AND es.curriculum_id = ?
                AND es.course_id = ?
                AND es.active_school_year_id = ?
-               AND sst.year_level_id = ?
-               AND UPPER(TRIM(pt.last_name)) = UPPER(TRIM(?))
-               AND UPPER(TRIM(pt.first_name)) = UPPER(TRIM(?))
-               AND UPPER(TRIM(COALESCE(pt.middle_name, ''))) = UPPER(TRIM(?))
              LIMIT 1`,
               [
                 studentNumber,
                 curriculumId,
                 courseId,
                 activeSchoolYearId,
-                yearLevelId,
-                lastName,
-                firstName,
-                middleName || "",
               ],
             );
 
@@ -1075,6 +1108,12 @@ router.post(
               });
               skippedItems.push({
                 studentNumber,
+                curriculumId,
+                courseId,
+                courseCode: subjectID,
+                yearLevelId,
+                activeSchoolYearId,
+                schoolYear: group.schoolYear,
                 reason: `${studentNumber}'s Data Already exist`,
               });
               seenRowSignatures.add(rowSignature);
@@ -1086,6 +1125,7 @@ router.post(
               curriculumId,
               courseId,
               activeSchoolYearId,
+              yearLevelId,
               midterm: gradeOutcome.midterm,
               finals: gradeOutcome.finals,
               finalGrade: gradeOutcome.finalGrade,
@@ -1114,7 +1154,7 @@ router.post(
           // Step 2 + 3 + 4: Insert only (no updates) person, person status, student numbering.
           let personId = null;
           const [existingStudentNumber] = await connection.query(
-            `SELECT person_id FROM student_numbering_table WHERE student_number = ? LIMIT 1`,
+            `SELECT person_id FROM student_numbering_table WHERE student_number = ?`,
             [studentNumber],
           );
 
@@ -1128,36 +1168,89 @@ router.post(
               },
             );
           } else {
-            const [personInsert] = await connection.query(
-              `INSERT INTO person_table (campus, last_name, first_name, middle_name)
-             VALUES (?, ?, ?, ?)`,
-              [campus, lastName, firstName, middleName || null],
+            const [existingPersonRows] = await connection.query(
+              `SELECT DISTINCT pt.person_id
+               FROM person_table pt
+               INNER JOIN student_numbering_table snt
+                 ON snt.person_id = pt.person_id
+               LEFT JOIN student_status_table sst
+                 ON sst.student_number = snt.student_number
+               LEFT JOIN enrolled_subject es
+                 ON es.student_number = snt.student_number
+               WHERE UPPER(TRIM(pt.last_name)) = UPPER(TRIM(?))
+                 AND UPPER(TRIM(pt.first_name)) = UPPER(TRIM(?))
+                 AND UPPER(TRIM(COALESCE(pt.middle_name, ''))) = UPPER(TRIM(?))
+                 AND (
+                   sst.active_curriculum = ?
+                   OR es.curriculum_id = ?
+                 )
+               LIMIT 1`,
+              [lastName, firstName, middleName || "", curriculumId, curriculumId],
             );
-            personId = personInsert.insertId;
-            createdPersons += 1;
-            createdPersonIds.push(personId);
 
-            await connection.query(
+            if (existingPersonRows.length > 0) {
+              personId = existingPersonRows[0].person_id;
+              console.log(
+                "[IMPORT][GROUP] Existing person found by name + curriculum",
+                {
+                  studentNumber,
+                  personId,
+                  curriculumId,
+                },
+              );
+            } else {
+              const [personInsert] = await connection.query(
+                `INSERT INTO person_table (campus, last_name, first_name, middle_name)
+               VALUES (?, ?, ?, ?)`,
+                [campus, lastName, firstName, middleName || null],
+              );
+              personId = personInsert.insertId;
+              createdPersons += 1;
+              createdPersonIds.push(personId);
+            }
+
+            const [studentNumberInsert] = await connection.query(
               `INSERT INTO student_numbering_table (student_number, person_id)
-             VALUES (?, ?)`,
-              [studentNumber, personId],
+               SELECT ?, ?
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM student_numbering_table WHERE student_number = ?
+               )`,
+              [studentNumber, personId, studentNumber],
             );
+
+            if (studentNumberInsert.affectedRows === 0) {
+              const [[existingNumberAfterInsert]] = await connection.query(
+                `SELECT person_id FROM student_numbering_table WHERE student_number = ? LIMIT 1`,
+                [studentNumber],
+              );
+              if (existingNumberAfterInsert) {
+                personId = existingNumberAfterInsert.person_id;
+              }
+            }
 
             console.log(
-              "[IMPORT][GROUP] Inserted new person + student_number",
+              "[IMPORT][GROUP] Linked student_number to person",
               {
                 studentNumber,
                 personId,
                 campus,
+                insertedStudentNumber: studentNumberInsert.affectedRows > 0,
               },
             );
           }
 
-          await connection.query(
-            `INSERT INTO person_status_table (person_id, student_registration_status)
-           VALUES (?, 1) ON DUPLICATE KEY UPDATE student_registration_status = student_registration_status`,
+          const [existingPersonStatus] = await connection.query(
+            `SELECT person_id FROM person_status_table WHERE person_id = ? LIMIT 1`,
             [personId],
           );
+
+          if (existingPersonStatus.length === 0) {
+            await connection.query(
+              `INSERT INTO person_status_table (person_id, student_registration_status)
+               VALUES (?, 1)`,
+              [personId],
+            );
+          }
 
           console.log(
             "[IMPORT][GROUP] Inserted person_status if missing (no update)",
@@ -1169,12 +1262,25 @@ router.post(
           );
 
           // Step 9: Insert student status only if missing (no updates).
-          await connection.query(
-            `INSERT IGNORE INTO student_status_table
-            (student_number, active_curriculum, enrolled_status, year_level_id, active_school_year_id, control_status)
-           VALUES (?, ?, 1, ?, ?, 0)`,
+          const [existingStudentStatus] = await connection.query(
+            `SELECT id
+             FROM student_status_table
+             WHERE student_number = ?
+               AND active_curriculum = ?
+               AND year_level_id = ?
+               AND active_school_year_id = ?
+             LIMIT 1`,
             [studentNumber, curriculumId, yearLevelId, activeSchoolYearId],
           );
+
+          if (existingStudentStatus.length === 0) {
+            await connection.query(
+              `INSERT INTO student_status_table
+              (student_number, active_curriculum, enrolled_status, year_level_id, active_school_year_id, control_status)
+             VALUES (?, ?, 1, ?, ?, 0)`,
+              [studentNumber, curriculumId, yearLevelId, activeSchoolYearId],
+            );
+          }
 
           console.log(
             "[IMPORT][GROUP] Inserted student_status if missing (no update)",
@@ -1188,6 +1294,35 @@ router.post(
           );
 
           for (const payload of rowsToInsert) {
+            const [existingEnrolledSubject] = await connection.query(
+              `SELECT id
+               FROM enrolled_subject
+               WHERE student_number = ?
+                 AND active_school_year_id = ?
+                 AND curriculum_id = ?
+                 AND course_id = ?
+               LIMIT 1`,
+              [
+                payload.studentNumber,
+                payload.activeSchoolYearId,
+                payload.curriculumId,
+                payload.courseId,
+              ],
+            );
+
+            if (existingEnrolledSubject.length > 0) {
+              skippedItems.push({
+                studentNumber: payload.studentNumber,
+                curriculumId: payload.curriculumId,
+                courseId: payload.courseId,
+                yearLevelId: payload.yearLevelId,
+                activeSchoolYearId: payload.activeSchoolYearId,
+                schoolYear: group.schoolYear,
+                reason: `${payload.studentNumber}'s enrolled subject already exists`,
+              });
+              continue;
+            }
+
             await connection.query(
               `INSERT INTO enrolled_subject
               (student_number, curriculum_id, course_id, active_school_year_id, midterm, finals, final_grade, en_remarks, grades_status, department_section_id, status, fe_status, remarks)
@@ -1266,7 +1401,8 @@ router.post(
         insertedSubjects,
         insertedCourses,
         skippedCount: skippedItems.length,
-        skippedItems: skippedItems.slice(0, 50),
+        skippedItems,
+        missingCurriculums,
         warnings: req.xlsxWarnings || {},
       });
     } catch (err) {

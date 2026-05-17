@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useContext, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useContext, useMemo } from 'react';
 import { SettingsContext } from "../App";
 import axios from 'axios';
 import {
@@ -25,9 +25,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  List,
-  ListItem,
-  ListItemText,
 } from '@mui/material';
 import API_BASE_URL from '../apiConfig';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -49,6 +46,12 @@ const FILTER_MENU_PROPS = {
         },
     },
 };
+
+const IMPORT_DETAIL_ROW_HEIGHT = 46;
+const IMPORT_DETAIL_OVERSCAN = 8;
+const IMPORT_DETAIL_VIEWPORT_HEIGHT = 460;
+const IMPORT_DETAIL_GRID_COLUMNS = "145px 130px 120px 120px 145px minmax(280px, 1fr)";
+const IMPORT_DETAIL_MIN_WIDTH = 940;
 
 const UploadEnrolledSubject = () => {
     const settings = useContext(SettingsContext);
@@ -104,9 +107,11 @@ const UploadEnrolledSubject = () => {
     const [skippedDialogOpen, setSkippedDialogOpen] = useState(false);
     const [skippedRows, setSkippedRows] = useState([]);
     const [importDetailsTitle, setImportDetailsTitle] = useState("Skipped Student Data");
+    const [importDetailScrollTop, setImportDetailScrollTop] = useState(0);
 
     const progressTimerRef = useRef(null);
     const fileInputRef = useRef(null);
+    const importDetailViewportRef = useRef(null);
     const pageId = 151;
 
     const getPermissionHeaders = () => ({
@@ -299,6 +304,14 @@ const UploadEnrolledSubject = () => {
     }, []);
 
     useEffect(() => {
+        if (!skippedDialogOpen) return;
+        setImportDetailScrollTop(0);
+        if (importDetailViewportRef.current) {
+            importDetailViewportRef.current.scrollTop = 0;
+        }
+    }, [skippedDialogOpen, skippedRows.length]);
+
+    useEffect(() => {
         if (progressValue < 25) {
             setProgressStep('sorting');
             setProgressMessage('Sorting XLSX data...');
@@ -462,15 +475,81 @@ const UploadEnrolledSubject = () => {
         return 'pending';
     };
 
+    const normalizeImportDetailRow = useCallback((item = {}) => ({
+        studentNumber:
+            item.studentNumber ||
+            item.student_number ||
+            item.student ||
+            item.row ||
+            "N/A",
+        curriculumId:
+            item.curriculumId ||
+            item.curriculum_id ||
+            item.active_curriculum ||
+            item.programCode ||
+            item.program_code ||
+            "-",
+        courseId:
+            item.courseId ||
+            item.course_id ||
+            item.courseCode ||
+            item.course_code ||
+            "-",
+        yearLevelId:
+            item.yearLevelId ||
+            item.year_level_id ||
+            item.yearLevel ||
+            item.year_level ||
+            "-",
+        schoolYear:
+            item.schoolYear ||
+            item.school_year ||
+            item.activeSchoolYearId ||
+            item.active_school_year_id ||
+            item.curriculumYear ||
+            item.curriculum_year ||
+            "-",
+        reason: item.reason || item.message || "No reason provided",
+    }), []);
+
+    const openImportDetails = (title, rows) => {
+        setImportDetailsTitle(title);
+        setSkippedRows((Array.isArray(rows) ? rows : []).map(normalizeImportDetailRow));
+        setSkippedDialogOpen(true);
+    };
+
+    const normalizedSkippedRows = useMemo(
+        () => skippedRows.map(normalizeImportDetailRow),
+        [skippedRows, normalizeImportDetailRow],
+    );
+
+    const totalImportDetailHeight = normalizedSkippedRows.length * IMPORT_DETAIL_ROW_HEIGHT;
+    const importDetailStartIndex = Math.max(
+        0,
+        Math.floor(importDetailScrollTop / IMPORT_DETAIL_ROW_HEIGHT) - IMPORT_DETAIL_OVERSCAN,
+    );
+    const importDetailVisibleCount =
+        Math.ceil(IMPORT_DETAIL_VIEWPORT_HEIGHT / IMPORT_DETAIL_ROW_HEIGHT) +
+        IMPORT_DETAIL_OVERSCAN * 2;
+    const importDetailEndIndex = Math.min(
+        normalizedSkippedRows.length,
+        importDetailStartIndex + importDetailVisibleCount,
+    );
+    const visibleImportDetailRows = normalizedSkippedRows.slice(
+        importDetailStartIndex,
+        importDetailEndIndex,
+    );
+
     const buildImportFailureDetails = (data = {}) => {
         data = data || {};
         const details = [];
-        const addDetail = (studentNumber, reason) => {
+        const addDetail = (studentNumber, reason, extra = {}) => {
             const safeReason = String(reason || "").trim();
             if (!safeReason) return;
             details.push({
                 studentNumber: studentNumber || "Import failed",
                 reason: safeReason,
+                ...extra,
             });
         };
 
@@ -486,6 +565,10 @@ const UploadEnrolledSubject = () => {
             addDetail(
                 course.course_code || "Missing course",
                 `Course not found${course.course_description ? `: ${course.course_description}` : ""}`,
+                {
+                    courseCode: course.course_code,
+                    courseId: course.course_id,
+                },
             );
         });
 
@@ -494,6 +577,19 @@ const UploadEnrolledSubject = () => {
             : [];
         missingCourseCodes.forEach((courseCode) => {
             addDetail(courseCode || "Missing course", "Course code does not exist.");
+        });
+
+        const missingCurriculums = Array.isArray(data.missingCurriculums)
+            ? data.missingCurriculums
+            : Array.isArray(data.missing_curriculums)
+              ? data.missing_curriculums
+              : [];
+        missingCurriculums.forEach((curriculum) => {
+            addDetail(
+                curriculum.studentNumber || curriculum.student_number || "Missing curriculum",
+                `Curriculum not found: ${curriculum.programCode || curriculum.program_code || "Unknown program"}${curriculum.major ? ` (${curriculum.major})` : ""}${curriculum.curriculumYear || curriculum.curriculum_year ? ` - ${curriculum.curriculumYear || curriculum.curriculum_year}` : ""}`,
+                curriculum,
+            );
         });
 
         const invalidNstpComponents = Array.isArray(data.invalid_nstp_components)
@@ -511,10 +607,46 @@ const UploadEnrolledSubject = () => {
             addDetail(
                 item.studentNumber || item.student_number || "Skipped row",
                 item.reason || item.message || "No reason provided",
+                item,
             );
         });
 
         return details;
+    };
+
+    const buildMissingCurriculumDetails = (data = {}) => {
+        const missingCurriculums = Array.isArray(data?.missingCurriculums)
+            ? data.missingCurriculums
+            : Array.isArray(data?.missing_curriculums)
+              ? data.missing_curriculums
+              : [];
+
+        return missingCurriculums.map((curriculum) => ({
+            studentNumber:
+                curriculum.studentNumber ||
+                curriculum.student_number ||
+                curriculum.programCode ||
+                curriculum.program_code ||
+                "Missing curriculum",
+            curriculumId: curriculum.curriculumId || curriculum.curriculum_id || "-",
+            courseId: curriculum.courseId || curriculum.course_id || "-",
+            yearLevelId: curriculum.yearLevelId || curriculum.year_level_id || "-",
+            schoolYear:
+                curriculum.schoolYear ||
+                curriculum.school_year ||
+                curriculum.curriculumYear ||
+                curriculum.curriculum_year ||
+                "-",
+            reason: `Curriculum not found: ${curriculum.programCode || curriculum.program_code || "Unknown program"}${curriculum.major ? ` (${curriculum.major})` : ""}${curriculum.curriculumYear || curriculum.curriculum_year ? ` - ${curriculum.curriculumYear || curriculum.curriculum_year}` : ""}`,
+        }));
+    };
+
+    const displayMissingCurriculum = (data = {}) => {
+        const details = buildMissingCurriculumDetails(data);
+        if (details.length === 0) return false;
+
+        openImportDetails("Missing Curriculum", details);
+        return true;
     };
 
     const showImportFailure = (data = {}, fallbackMessage = "Import failed.") => {
@@ -531,10 +663,8 @@ const UploadEnrolledSubject = () => {
             severity: 'error',
         });
 
-        if (details.length > 0) {
-            setImportDetailsTitle("Import Failed Details");
-            setSkippedRows(details);
-            setSkippedDialogOpen(true);
+        if (!displayMissingCurriculum(data) && details.length > 0) {
+            openImportDetails("Import Failed Details", details);
         }
     };
 
@@ -590,16 +720,20 @@ const UploadEnrolledSubject = () => {
             const skippedCount = Number(res.data?.skippedCount || 0);
             const skippedItems = Array.isArray(res.data?.skippedItems) ? res.data.skippedItems : [];
             const importedCount = Number(res.data?.insertedCount || res.data?.importedCount || 0);
+            const missingCurriculumCount = Array.isArray(res.data?.missingCurriculums)
+                ? res.data.missingCurriculums.length
+                : 0;
 
             if (skippedCount > 0) {
                 setSnackbar({
                     open: true,
-                    message: `Import finished with ${skippedCount} skipped row(s).`,
+                    message:
+                        missingCurriculumCount > 0
+                            ? `Import finished with ${skippedCount} row(s) not inserted, including ${missingCurriculumCount} missing curriculum record(s).`
+                            : `Import finished with ${skippedCount} row(s) not inserted.`,
                     severity: 'warning',
                 });
-                setImportDetailsTitle("Skipped Student Data");
-                setSkippedRows(skippedItems);
-                setSkippedDialogOpen(true);
+                openImportDetails("Data Not Inserted", skippedItems);
             } else {
                 setSnackbar({
                     open: true,
@@ -1187,24 +1321,106 @@ const UploadEnrolledSubject = () => {
         <Dialog
             open={skippedDialogOpen}
             onClose={() => setSkippedDialogOpen(false)}
-            maxWidth="md"
+            maxWidth="lg"
             fullWidth
         >
-            <DialogTitle>{importDetailsTitle}</DialogTitle>
-            <DialogContent dividers>
-                {skippedRows.length === 0 ? (
-                    <Typography variant="body2">No import details provided.</Typography>
+            <DialogTitle>
+                {importDetailsTitle}
+                {normalizedSkippedRows.length > 0 ? ` (${normalizedSkippedRows.length})` : ""}
+            </DialogTitle>
+            <DialogContent dividers sx={{ p: 0 }}>
+                {normalizedSkippedRows.length === 0 ? (
+                    <Typography variant="body2" sx={{ p: 2 }}>
+                        No import details provided.
+                    </Typography>
                 ) : (
-                    <List dense>
-                        {skippedRows.map((item, index) => (
-                            <ListItem key={`${item.studentNumber || "NA"}-${index}`} sx={{ px: 0 }}>
-                                <ListItemText
-                                    primary={`${index + 1}. ${item.studentNumber || "Unknown Student"}`}
-                                    secondary={item.reason || "No reason provided"}
-                                />
-                            </ListItem>
-                        ))}
-                    </List>
+                    <Box sx={{ overflowX: "auto" }}>
+                        <Box
+                            sx={{
+                                display: "grid",
+                                gridTemplateColumns: IMPORT_DETAIL_GRID_COLUMNS,
+                                gap: 0,
+                                minWidth: IMPORT_DETAIL_MIN_WIDTH,
+                                bgcolor: "#f5f5f5",
+                                borderBottom: "1px solid #d0d0d0",
+                                fontWeight: 700,
+                                fontSize: "12px",
+                            }}
+                        >
+                            {["Student Number", "Curriculum ID", "Course ID", "Year Level ID", "School Year", "Reason Not Inserted"].map((label) => (
+                                <Box
+                                    key={label}
+                                    sx={{
+                                        px: 1.5,
+                                        py: 1,
+                                        borderRight: "1px solid #d0d0d0",
+                                        whiteSpace: "nowrap",
+                                    }}
+                                >
+                                    {label}
+                                </Box>
+                            ))}
+                        </Box>
+                        <Box
+                            ref={importDetailViewportRef}
+                            onScroll={(event) => setImportDetailScrollTop(event.currentTarget.scrollTop)}
+                            sx={{
+                                height: IMPORT_DETAIL_VIEWPORT_HEIGHT,
+                                overflowY: "auto",
+                                overflowX: "hidden",
+                                position: "relative",
+                            }}
+                        >
+                            <Box sx={{ height: totalImportDetailHeight, minWidth: IMPORT_DETAIL_MIN_WIDTH, position: "relative" }}>
+                                {visibleImportDetailRows.map((item, visibleIndex) => {
+                                    const rowIndex = importDetailStartIndex + visibleIndex;
+                                    return (
+                                        <Box
+                                            key={`${item.studentNumber}-${item.curriculumId}-${item.courseId}-${rowIndex}`}
+                                            sx={{
+                                                position: "absolute",
+                                                top: rowIndex * IMPORT_DETAIL_ROW_HEIGHT,
+                                                left: 0,
+                                                right: 0,
+                                                height: IMPORT_DETAIL_ROW_HEIGHT,
+                                                display: "grid",
+                                                gridTemplateColumns: IMPORT_DETAIL_GRID_COLUMNS,
+                                                alignItems: "stretch",
+                                                borderBottom: "1px solid #eeeeee",
+                                                bgcolor: rowIndex % 2 === 0 ? "#fff" : "#fafafa",
+                                                fontSize: "12px",
+                                            }}
+                                        >
+                                            {[
+                                                item.studentNumber,
+                                                item.curriculumId,
+                                                item.courseId,
+                                                item.yearLevelId,
+                                                item.schoolYear,
+                                                item.reason,
+                                            ].map((value, cellIndex) => (
+                                                <Box
+                                                    key={cellIndex}
+                                                    title={String(value || "-")}
+                                                    sx={{
+                                                        px: 1.5,
+                                                        py: 0.75,
+                                                        borderRight: "1px solid #eeeeee",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                    }}
+                                                >
+                                                    {value || "-"}
+                                                </Box>
+                                            ))}
+                                        </Box>
+                                    );
+                                })}
+                            </Box>
+                        </Box>
+                    </Box>
                 )}
             </DialogContent>
             <DialogActions>
