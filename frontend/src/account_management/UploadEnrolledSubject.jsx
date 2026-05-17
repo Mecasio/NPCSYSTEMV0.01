@@ -103,6 +103,7 @@ const UploadEnrolledSubject = () => {
     });
     const [skippedDialogOpen, setSkippedDialogOpen] = useState(false);
     const [skippedRows, setSkippedRows] = useState([]);
+    const [importDetailsTitle, setImportDetailsTitle] = useState("Skipped Student Data");
 
     const progressTimerRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -461,6 +462,82 @@ const UploadEnrolledSubject = () => {
         return 'pending';
     };
 
+    const buildImportFailureDetails = (data = {}) => {
+        data = data || {};
+        const details = [];
+        const addDetail = (studentNumber, reason) => {
+            const safeReason = String(reason || "").trim();
+            if (!safeReason) return;
+            details.push({
+                studentNumber: studentNumber || "Import failed",
+                reason: safeReason,
+            });
+        };
+
+        addDetail(null, data.error || data.message || data.detail);
+        if (data.detail && data.detail !== data.error && data.detail !== data.message) {
+            addDetail("Reason", data.detail);
+        }
+
+        const missingCourses = Array.isArray(data.missing_courses)
+            ? data.missing_courses
+            : [];
+        missingCourses.forEach((course) => {
+            addDetail(
+                course.course_code || "Missing course",
+                `Course not found${course.course_description ? `: ${course.course_description}` : ""}`,
+            );
+        });
+
+        const missingCourseCodes = Array.isArray(data.missing_course_codes)
+            ? data.missing_course_codes
+            : [];
+        missingCourseCodes.forEach((courseCode) => {
+            addDetail(courseCode || "Missing course", "Course code does not exist.");
+        });
+
+        const invalidNstpComponents = Array.isArray(data.invalid_nstp_components)
+            ? data.invalid_nstp_components
+            : [];
+        invalidNstpComponents.forEach((item) => {
+            addDetail(
+                item.detected_course_code || "Invalid NSTP component",
+                `Unsupported NSTP component${item.semester ? ` for ${item.semester}` : ""}.`,
+            );
+        });
+
+        const skippedItems = Array.isArray(data.skippedItems) ? data.skippedItems : [];
+        skippedItems.forEach((item) => {
+            addDetail(
+                item.studentNumber || item.student_number || "Skipped row",
+                item.reason || item.message || "No reason provided",
+            );
+        });
+
+        return details;
+    };
+
+    const showImportFailure = (data = {}, fallbackMessage = "Import failed.") => {
+        data = data || {};
+        const details = buildImportFailureDetails(data);
+        const message =
+            data.error && data.detail && data.detail !== data.error
+                ? `${data.error}: ${data.detail}`
+                : data.error || data.message || data.detail || fallbackMessage;
+
+        setSnackbar({
+            open: true,
+            message,
+            severity: 'error',
+        });
+
+        if (details.length > 0) {
+            setImportDetailsTitle("Import Failed Details");
+            setSkippedRows(details);
+            setSkippedDialogOpen(true);
+        }
+    };
+
     const handleImportXlsx = async () => {
         if (!canCreate) {
         setSnackbar({
@@ -520,6 +597,7 @@ const UploadEnrolledSubject = () => {
                     message: `Import finished with ${skippedCount} skipped row(s).`,
                     severity: 'warning',
                 });
+                setImportDetailsTitle("Skipped Student Data");
                 setSkippedRows(skippedItems);
                 setSkippedDialogOpen(true);
             } else {
@@ -543,20 +621,12 @@ const UploadEnrolledSubject = () => {
             await fetchUploadedStudent();
         } else {
             await finishProgressTracking(false);
-            setSnackbar({
-            open: true,
-            message: res.data?.error || 'Import failed.',
-            severity: 'error',
-            });
+            showImportFailure(res.data, 'Import failed.');
         }
         } catch (err) {
             console.error('Import failed:', err);
             await finishProgressTracking(false);
-            setSnackbar({
-                open: true,
-                message: err.response?.data?.error || 'Import failed.',
-                severity: 'error',
-            });
+            showImportFailure(err.response?.data, err.message || 'Import failed.');
         } finally {
             setImporting(false);
             if (fileInputRef.current) {
@@ -1120,10 +1190,10 @@ const UploadEnrolledSubject = () => {
             maxWidth="md"
             fullWidth
         >
-            <DialogTitle>Skipped Student Data</DialogTitle>
+            <DialogTitle>{importDetailsTitle}</DialogTitle>
             <DialogContent dividers>
                 {skippedRows.length === 0 ? (
-                    <Typography variant="body2">No skipped rows details provided.</Typography>
+                    <Typography variant="body2">No import details provided.</Typography>
                 ) : (
                     <List dense>
                         {skippedRows.map((item, index) => (

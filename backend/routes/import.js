@@ -745,6 +745,7 @@ router.post(
       let processedStudents = 0;
       let insertedSubjects = 0;
       let insertedCourses = 0;
+      const createdPersonIds = [];
       const skippedItems = [];
       const seenRowSignatures = new Set();
       const gradeConversions = await getGradeConversions();
@@ -976,8 +977,8 @@ router.post(
             } else {
               const [insertResult] = await connection.query(
                 `INSERT INTO course_table
-                 (course_code, course_description, course_unit, lec_unit, lab_unit, prereq, corequisite, office_duty, is_included, include_summa, include_magna, include_cum)
-                 VALUES (?, ?, 0, 0, 0, NULL, NULL, 0, 1, 0, 0, 0)`,
+                 (course_code, course_description, course_unit, lec_unit, lab_unit, prereq, corequisite, office_duty)
+                 VALUES (?, ?, 0, 0, 0, NULL, NULL, 0)`,
                 [subjectID, subjectDescription || subjectID],
               );
               courseId = insertResult.insertId;
@@ -1134,6 +1135,7 @@ router.post(
             );
             personId = personInsert.insertId;
             createdPersons += 1;
+            createdPersonIds.push(personId);
 
             await connection.query(
               `INSERT INTO student_numbering_table (student_number, person_id)
@@ -1238,8 +1240,15 @@ router.post(
         });
       } catch (transactionErr) {
         await connection.rollback();
+        if (createdPersonIds.length > 0) {
+          await connection.query(
+            `DELETE FROM person_table WHERE person_id IN (?)`,
+            [createdPersonIds],
+          );
+        }
         console.log("[IMPORT] Transaction rolled back", {
           message: transactionErr.message,
+          cleanedPersonIds: createdPersonIds,
         });
         throw transactionErr;
       } finally {

@@ -5,7 +5,9 @@ const MB = 1024 * 1024;
 
 const XLSX_IMPORT_LIMITS = {
   MAX_FILE_SIZE_MB: Number(process.env.MAX_XLSX_FILE_SIZE_MB || 120),
-  MAX_ROWS: Number(process.env.MAX_XLSX_ROWS || 10000),
+  // TEMPORARY: allow very large migration imports during testing.
+  // Restore a smaller default before production use.
+  MAX_ROWS: Number(process.env.MAX_XLSX_ROWS || 900000),
   MAX_COLS: Number(process.env.MAX_XLSX_COLS || 120),
   BATCH_SIZE: Number(process.env.XLSX_BATCH_SIZE || 100),
 };
@@ -38,13 +40,15 @@ function validateSpreadsheetUpload(file) {
   }
 
   const sizeMb = getFileSizeMB(file.size || 0);
-  if (sizeMb > XLSX_IMPORT_LIMITS.MAX_FILE_SIZE_MB) {
-    return {
-      valid: false,
-      status: 413,
-      error: `File too large. Max allowed is ${XLSX_IMPORT_LIMITS.MAX_FILE_SIZE_MB}MB`,
-    };
-  }
+  // TEMPORARY: allow oversized migration spreadsheets while large imports are being tested.
+  // Restore this guard before production use to avoid high memory usage from multer + XLSX.read.
+  // if (sizeMb > XLSX_IMPORT_LIMITS.MAX_FILE_SIZE_MB) {
+  //   return {
+  //     valid: false,
+  //     status: 413,
+  //     error: `File too large. Max allowed is ${XLSX_IMPORT_LIMITS.MAX_FILE_SIZE_MB}MB`,
+  //   };
+  // }
 
   if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
     return {
@@ -58,14 +62,13 @@ function validateSpreadsheetUpload(file) {
 }
 
 function readWorkbookSafely(file) {
-  const sizeMb = getFileSizeMB(file?.size || 0);
-  const shouldBoundRows = sizeMb > 10;
-
   return XLSX.read(file.buffer, {
     type: "buffer",
     dense: true,
     cellFormula: true,
-    sheetRows: shouldBoundRows ? XLSX_IMPORT_LIMITS.MAX_ROWS + 5 : 0,
+    // TEMPORARY: read the full worksheet during large migration import testing.
+    // Restore sheetRows bounding before production use to reduce memory pressure.
+    sheetRows: 0,
   });
 }
 
@@ -170,8 +173,10 @@ function getDynamicRowLimitByFileSize(sizeInBytes = 0) {
 }
 
 function prepareRowsForInsert(rows, sizeInBytes) {
-  const limit = getDynamicRowLimitByFileSize(sizeInBytes);
-  return { rowsToInsert: rows.slice(0, limit), limit };
+  const limit = rows.length;
+  // TEMPORARY: do not slice rows during large migration import testing.
+  // Restore getDynamicRowLimitByFileSize(sizeInBytes) before production use.
+  return { rowsToInsert: rows, limit };
 }
 
 async function processInBatches(rows, handler, batchSize = XLSX_IMPORT_LIMITS.BATCH_SIZE) {

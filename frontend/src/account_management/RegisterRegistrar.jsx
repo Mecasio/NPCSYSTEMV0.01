@@ -1082,6 +1082,7 @@ const RegisterRegistrar = () => {
                                 label="Employee ID"
                                 name="employee_id"
                                 value={form.employee_id}
+                                InputProps={{ readOnly: Boolean(editData) }}
                                 onChange={handleChange}
                                 fullWidth
                             />
